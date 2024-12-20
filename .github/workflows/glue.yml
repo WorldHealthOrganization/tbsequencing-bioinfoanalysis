@@ -15,6 +15,7 @@ jobs:
     uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/glue_copy_scripts.yml@main
     with:
       environment: ${{inputs.environment}}
+      role_name: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'copy-glue'}}
     secrets:
       AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
   
