@@ -1,0 +1,20 @@
+name: 'Copy AWS Glue scripts to S3'
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: environment
+
+permissions:
+  id-token: write
+  contents: read
+  
+jobs:
+  copy-glue-scripts-s3:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/glue_copy_scripts.yml@main
+    with:
+      environment: ${{inputs.environment}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+  

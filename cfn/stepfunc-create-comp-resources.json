@@ -1,0 +1,251 @@
+{
+    "Comment": "Worfklow which creates the computational resources for bioinformatic analyses.",
+    "StartAt": "formatParameters",
+    "States": {
+        "formatParameters": {
+            "Type": "Pass",
+            "Result": {
+                "SecurityGroupId": "${SecurityGroupId}"
+            },
+            "ResultPath": "$.AdditionalParams",
+            "Next": "getSubnetId"
+        },
+        "getSubnetId": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeSubnets",
+            "Parameters": {
+              "Filters": [
+                {
+                  "Name": "tag:access",
+                  "Values": [
+                    "private"
+                  ]
+                },
+                {
+                    "Name":"availability-zone",
+                    "Values.$": "States.Array($.AvailibilityZoneId)"
+                }
+              ]
+            },
+            "ResultPath": "$.Subnet",
+            "ResultSelector": {
+                "Id.$": "$.Subnets[0].SubnetId"
+            },
+            "Next": "createFSxFileSystem"
+          },
+              "createFSxFileSystem": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:fsx:createFileSystem",
+            "Parameters": {
+                "LustreConfiguration": {
+                    "AutoImportPolicy": "NEW",
+                    "DeploymentType": "SCRATCH_2",
+                    "ImportedFileChunkSize": 123,
+                    "ImportPath.$": "States.Format('s3://{}/references/', $.OutputBucket)",
+                    "ExportPath.$": "States.Format('s3://{}/lustre/results/', $.OutputBucket)"
+                },
+                "SecurityGroupIds.$": "States.Array($.AdditionalParams.SecurityGroupId)",
+                "SubnetIds.$": "States.Array($.Subnet.Id)",
+                "FileSystemType": "LUSTRE",
+                "StorageType": "SSD",
+                "StorageCapacity.$": "$.StorageCapacity",
+                "Tags": [
+                    {
+                        "Key": "Project",
+                        "Value": "${ProjectLowerCase}"
+                    },
+                    {
+                        "Key": "Requester",
+                        "Value.$": "States.Format('StateMachine-{}', $$.Execution.Id)"
+                    }
+                ]
+            },
+            "ResultPath": "$.FSx",
+            "ResultSelector": {
+                "Name.$": "$.FileSystem.FileSystemId",
+                "MountName.$": "$.FileSystem.LustreConfiguration.MountName"
+            },
+            "Next": "formatMimeData"
+        },
+        "formatMimeData": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaCreateMime}",
+                "Payload.$": "$"
+            },
+            "ResultPath": "$.MimeDataBinary",
+            "ResultSelector": {
+                "Value.$": "$.Payload"
+            },
+            "Next": "createLaunchTemplate"
+        },
+        "createLaunchTemplate": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:ec2:createLaunchTemplate",
+            "Parameters": {
+                "LaunchTemplateData": {
+                    "BlockDeviceMappings": [
+                        {
+                            "DeviceName": "/dev/xvda",
+                            "Ebs": {
+                                "Encrypted": true,
+                                "DeleteOnTermination": true,
+                                "VolumeSize": 30,
+                                "VolumeType": "gp2"
+                            }
+                        }
+                    ],
+                    "UserData.$": "$.MimeDataBinary.Value"
+                },
+                "LaunchTemplateName.$": "States.Format('${ProjectLowerCase}-Filesystem_{}', $.FSx.Name)",
+                "TagSpecifications": [
+                    {
+                        "ResourceType": "launch-template",
+                        "Tags": [
+                            {
+                                "Key": "Project",
+                                "Value": "${ProjectLowerCase}"
+                            },
+                            {
+                                "Key": "Storage",
+                                "Value": "FSx"
+                            },
+                            {
+                                "Key": "FSxName",
+                                "Value.$": "$.FSx.Name"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "ResultPath": "$.LaunchTemplate",
+            "ResultSelector": {
+                "Id.$": "$.LaunchTemplate.LaunchTemplateId"
+            },
+            "Next": "createComputeEnvironment"
+        },
+        "createComputeEnvironment": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:createComputeEnvironment",
+            "Parameters": {
+                "ComputeEnvironmentName.$": "States.Format('${ProjectLowerCase}-Filesystem_{}-Template_{}', $.FSx.Name, $.LaunchTemplate.Id)",
+                "Type": "MANAGED",
+                "State": "ENABLED",
+                "ServiceRole": "${ServiceRoleArn}",
+                "ComputeResources": {
+                    "Type": "SPOT",
+                    "AllocationStrategy": "BEST_FIT",
+                    "MinvCpus": 0,
+                    "MaxvCpus": 5000,
+                    "DesiredvCpus": 0,
+                    "InstanceTypes": [
+                        "optimal"
+                    ],
+                    "Subnets.$": "States.Array($.Subnet.Id)",
+                    "SecurityGroupIds.$": "States.Array($.AdditionalParams.SecurityGroupId)",
+                    "InstanceRole": "${InstanceProfileRoleArn}",
+                    "BidPercentage": 100,
+                    "SpotIamFleetRole": "${FleetRoleArn}",
+                    "LaunchTemplate": {
+                        "LaunchTemplateId.$": "$.LaunchTemplate.Id"
+                    },
+                    "Tags": {
+                        "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)",
+                        "FSxName.$": "$.FSx.Name",
+                        "Template.$": "$.LaunchTemplate.Id",
+                        "Project": "${ProjectLowerCase}"
+                    }
+                }
+            },
+            "ResultPath": "$.ComputeEnvironment",
+            "ResultSelector": {
+                "Arn.$": "$.ComputeEnvironmentArn"
+            },
+            "Next": "waitTenSeconds"
+        },
+        "waitTenSeconds": {
+            "Type": "Wait",
+            "Seconds": 10,
+            "Next": "getComputeEnvironmentStatus"
+        },
+        "getComputeEnvironmentStatus": {
+            "Type": "Task",
+            "InputPath": "$",
+            "Resource": "arn:aws:states:::aws-sdk:batch:describeComputeEnvironments",
+            "Parameters": {
+                "ComputeEnvironments.$": "States.Array($.ComputeEnvironment.Arn)"
+            },
+            "ResultPath": "$.ComputeEnvironmentStatus",
+            "ResultSelector": {
+                "Value.$": "$.ComputeEnvironments[0].Status"
+            },
+            "Next": "choiceComputeEnvironmentReady"
+        },
+        "choiceComputeEnvironmentReady": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.ComputeEnvironmentStatus.Value",
+                    "StringEquals": "VALID",
+                    "Next": "createJobQueue"
+                },
+                {
+                    "Variable": "$.ComputeEnvironmentStatus.Value",
+                    "StringEquals": "CREATING",
+                    "Next": "waitTenSeconds"
+                }
+            ]
+        },
+        "createJobQueue": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:createJobQueue",
+            "Parameters": {
+                "JobQueueName.$": "States.Format('${ProjectLowerCase}-{}-Template_{}', $.FSx.Name, $.LaunchTemplate.Id)",
+                "State": "ENABLED",
+                "Priority": 1,
+                "ComputeEnvironmentOrder": [
+                    {
+                        "Order": 1,
+                        "ComputeEnvironment.$": "$.ComputeEnvironment.Arn"
+                    }
+                ],
+                "Tags": {
+                    "Project": "${ProjectLowerCase}",
+                    "TemplateName.$": "$.LaunchTemplate.Id",
+                    "FSxName.$": "$.FSx.Name",
+                    "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)",
+                    "Subnet.$": "$.Subnet.Id"
+                }
+            },
+            "Next": "tagComputeEnv",
+            "ResultPath": "$.JobQueue",
+            "ResultSelector": {
+                "Arn.$": "$.JobQueueArn"
+            }
+        },
+        "tagComputeEnv": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:tagResource",
+            "Parameters": {
+                "ResourceArn.$": "$.ComputeEnvironment.Arn",
+                "Tags": {
+                    "Queue.$": "$.JobQueue.Arn",
+                    "FSxName.$": "$.FSx.Name"
+                }
+            },
+            "Next": "passOutputValues",
+            "ResultPath": null
+        },
+        "passOutputValues": {
+            "Type": "Pass",
+            "End": true,
+            "Parameters": {
+                "JobQueueArn.$": "$.JobQueue.Arn",
+                "ComputeEnvArn.$": "$.ComputeEnvironment.Arn",
+                "FSxName.$": "$.FSx.Name",
+                "OutputBucket.$": "$.OutputBucket"
+            }
+        }
+    }
+}

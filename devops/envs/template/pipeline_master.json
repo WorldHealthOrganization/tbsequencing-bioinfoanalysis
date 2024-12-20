@@ -1,0 +1,1164 @@
+{
+    "Comment": "Master pipeline for analysis workflow.",
+    "StartAt": "DefineDefaults",
+    "States": {
+        "DefineDefaults": {
+            "Type": "Pass",
+            "Next": "ApplyDefaults",
+            "ResultPath": "$.InputDefaults",
+            "Parameters": {
+                "AssemblyName": "ASM19595v2",
+                "KrakenDbName": "mycobacterium",
+                "NucleotideAccession": "NC_000962.3",
+                "RefseqAssemblyAccession": "GCF_000195955.2",
+                "RDSQuery": "UPDATE submission_sample SET bioanalysis_status = 'Unprocessed' WHERE id IN (SELECT DISTINCT s_sample.id FROM submission_sample s_sample INNER JOIN submission_pdstest pdst ON s_sample.id = pdst.sample_id INNER JOIN submission_sequencingdata s_data ON s_sample.id = s_data.sample_id WHERE bioanalysis_status is null AND sequencing_platform='ILLUMINA' AND library_layout='PAIRED' AND library_preparation_strategy='WGS' and staging='f');",
+                "DbConnection": {
+                    "Port": "${DbPort}",
+                    "User": "${DbUser}",
+                    "Name": "${DbName}",
+                    "Region": "${Region}",
+                    "Endpoint": "${DbHost}"
+                },
+                "FSxStorageCapacity": 4800
+            }
+        },
+        "ApplyDefaults": {
+            "Type": "Pass",
+            "Next": "ExtractDefaults",
+            "ResultPath": "$",
+            "Parameters": {
+                "ParametersWithDefaults.$": "States.JsonMerge($.InputDefaults, $$.Execution.Input, false)"
+            }
+        },
+        "ExtractDefaults": {
+            "Type": "Pass",
+            "Next": "ConcurrencyProtectionGetStatus",
+            "ResultPath": "$",
+            "Parameters": {
+                "AssemblyName.$": "$.ParametersWithDefaults.AssemblyName",
+                "KrakenDbName.$": "$.ParametersWithDefaults.KrakenDbName",
+                "NucleotideAccession.$": "$.ParametersWithDefaults.NucleotideAccession",
+                "RefseqAssemblyAccession.$": "$.ParametersWithDefaults.RefseqAssemblyAccession",
+                "RDSQuery.$": "$.ParametersWithDefaults.RDSQuery",
+                "DbConnection.$": "$.ParametersWithDefaults.DbConnection",
+                "FSxStorageCapacity.$": "$.ParametersWithDefaults.FSxStorageCapacity"
+            }
+        },
+        "ConcurrencyProtectionGetStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+            "Parameters": {
+                "StateMachineArn.$": "$$.StateMachine.Id",
+                "StatusFilter": "RUNNING"
+            },
+            "Next": "ConcurrencyProtectionCheck",
+            "ResultSelector": {
+                "Count.$": "States.ArrayLength($.Executions)",
+                "Items.$": "$.Executions"
+            },
+            "ResultPath": "$.ConcurrencyProtectionRuns"
+        },
+        "ConcurrencyProtectionCheck": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.ConcurrencyProtectionRuns.Count",
+                    "NumericGreaterThan": 1,
+                    "Next": "ConcurrencyProtectionTriggered"
+                }
+            ],
+            "Default": "PrepareStateMachinesArns"
+        },
+        "ConcurrencyProtectionTriggered": {
+            "Type": "Fail",
+            "Error": "ConcurrencyProtectionTriggered",
+            "Cause": "Another instance is running in parallel, skipping this one"
+        },
+        "PrepareStateMachinesArns": {
+            "Type": "Pass",
+            "Parameters": {
+                "StateMachinesArns.$": "States.Array('${WorkflowDataInsertionArn}', '${WorkflowVariantAnnotationArn}')"
+            },
+            "ResultPath": "$.StateMachines",
+            "Next": "GlobalConcurrencyProtectionMap"
+        },
+        "GlobalConcurrencyProtectionMap": {
+            "Type": "Map",
+            "ItemsPath": "$.StateMachines.StateMachinesArns",
+            "MaxConcurrency": 0,
+            "ResultPath": null,
+            "Parameters": {
+                "StateMachineId.$": "$$.Map.Item.Value"
+            },
+            "Next": "PrepareSamples",
+            "Iterator": {
+                "StartAt": "GlobalConcurrencyProtectionGetStatus",
+                "States": {
+                    "GlobalConcurrencyProtectionGetStatus": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+                        "Parameters": {
+                            "StateMachineArn.$": "$.StateMachineId",
+                            "StatusFilter": "RUNNING"
+                        },
+                        "Next": "GlobalConcurrencyProtectionCheck",
+                        "ResultSelector": {
+                            "Count.$": "States.ArrayLength($.Executions)",
+                            "Items.$": "$.Executions"
+                        },
+                        "ResultPath": "$.GlobalConcurrencyProtectionRuns"
+                    },
+                    "GlobalConcurrencyProtectionCheck": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.GlobalConcurrencyProtectionRuns.Count",
+                                "NumericGreaterThan": 0,
+                                "Next": "GlobalConcurrencyProtectionTriggered"
+                            }
+                        ],
+                        "Default": "GlobalConcurrencyProtectionPassed"
+                    },
+                    "GlobalConcurrencyProtectionTriggered": {
+                        "Type": "Fail",
+                        "Error": "GlobalConcurrencyProtectionTriggered",
+                        "Cause": "Another instance is running in parallel, skipping this one"
+                    },
+                    "GlobalConcurrencyProtectionPassed": {
+                        "Type": "Pass",
+                        "End": true
+                    }
+                }
+            }
+        },
+        "PrepareSamples": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PrepareSamples}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query.$": "$.RDSQuery"
+                }
+            },
+            "ResultPath": null,
+            "Next": "GetSamples"
+        },
+        "GetSamples": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${GetSamples}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "SELECT DISTINCT id FROM submission_sample WHERE bioanalysis_status = 'Unprocessed' LIMIT(5000);"
+                }
+            },
+            "ResultPath": "$.Samples",
+            "ResultSelector": {
+                "Value.$": "$.Payload"
+            },
+            "Next": "checkForSamplesAvailability"
+        },
+        "checkForSamplesAvailability": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Samples.Value[0]",
+                    "IsPresent": false,
+                    "Next": "FurtherWorkflowFail"
+                }
+            ],
+            "Default": "createFSxFileSystem"
+        },
+        "createFSxFileSystem": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:fsx:createFileSystem",
+            "Parameters": {
+                "LustreConfiguration": {
+                    "AutoImportPolicy": "NEW",
+                    "DeploymentType": "SCRATCH_2",
+                    "ImportedFileChunkSize": 123,
+                    "ImportPath": "s3://${OutputBucket}/references/",
+                    "ExportPath": "s3://${OutputBucket}/lustre/results/"
+                },
+                "SecurityGroupIds.$": "States.Array('${SecurityGroupId}')",
+                "SubnetIds.$": "States.Array('${SubnetId}')",
+                "FileSystemType": "LUSTRE",
+                "StorageType": "SSD",
+                "StorageCapacity.$": "$.FSxStorageCapacity",
+                "Tags": [
+                    {
+                        "Key": "Project",
+                        "Value": "${Project}"
+                    },
+                    {
+                        "Key": "Requester",
+                        "Value.$": "States.Format('StateMachine-{}', $$.Execution.Id)"
+                    }
+                ]
+            },
+            "ResultPath": "$.FSx",
+            "ResultSelector": {
+                "Name.$": "$.FileSystem.FileSystemId",
+                "MountName.$": "$.FileSystem.LustreConfiguration.MountName"
+            },
+            "Next": "formatMimeData"
+        },
+        "formatMimeData": {
+            "Type": "Pass",
+            "Parameters": {
+                "Value.$": "States.Base64Encode(States.Format('MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"==BOUNDARY==\"\n\n--==BOUNDARY==\nContent-Type: text/cloud-config; charset=\"us-ascii\"\n\nruncmd:\n- amazon-linux-extras install -y lustre2.10\n- mkdir -p /scratch/working\n- mount -t lustre -o defaults,noatime,flock,_netdev {}.fsx.${Region}.amazonaws.com@tcp:/{} /scratch/working\n--==BOUNDARY==', $.FSx.Name, $.FSx.MountName))"
+            },
+            "ResultPath": "$.MimeDataBinary",
+            "Next": "createLaunchTemplate"
+        },
+        "createLaunchTemplate": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:ec2:createLaunchTemplate",
+            "Parameters": {
+                "LaunchTemplateData": {
+                    "BlockDeviceMappings": [
+                        {
+                            "DeviceName": "/dev/xvda",
+                            "Ebs": {
+                                "Encrypted": true,
+                                "DeleteOnTermination": true,
+                                "VolumeSize": 30,
+                                "VolumeType": "gp2"
+                            }
+                        }
+                    ],
+                    "UserData.$": "$.MimeDataBinary.Value"
+                },
+                "LaunchTemplateName.$": "States.Format('${Project}-Filesystem_{}', $.FSx.Name)",
+                "TagSpecifications": [
+                    {
+                        "ResourceType": "launch-template",
+                        "Tags": [
+                            {
+                                "Key": "Project",
+                                "Value": "${Project}"
+                            },
+                            {
+                                "Key": "Storage",
+                                "Value": "FSx"
+                            },
+                            {
+                                "Key": "FSxName",
+                                "Value.$": "$.FSx.Name"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "ResultPath": "$.LaunchTemplate",
+            "ResultSelector": {
+                "Id.$": "$.LaunchTemplate.LaunchTemplateId"
+            },
+            "Next": "createComputeEnvironment"
+        },
+        "createComputeEnvironment": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:createComputeEnvironment",
+            "Parameters": {
+                "ComputeEnvironmentName.$": "States.Format('${Project}-Filesystem_{}-Template_{}', $.FSx.Name, $.LaunchTemplate.Id)",
+                "Type": "MANAGED",
+                "State": "ENABLED",
+                "ServiceRole": "${ServiceRoleArn}",
+                "ComputeResources": {
+                    "Type": "SPOT",
+                    "AllocationStrategy": "BEST_FIT",
+                    "MinvCpus": 0,
+                    "MaxvCpus": 5000,
+                    "DesiredvCpus": 0,
+                    "InstanceTypes": [
+                        "optimal"
+                    ],
+                    "Subnets.$": "States.Array('${SubnetId}')",
+                    "SecurityGroupIds.$": "States.Array('${SecurityGroupId}')",
+                    "InstanceRole": "${InstanceProfileRoleArn}",
+                    "BidPercentage": 100,
+                    "SpotIamFleetRole": "${FleetRoleArn}",
+                    "LaunchTemplate": {
+                        "LaunchTemplateId.$": "$.LaunchTemplate.Id"
+                    },
+                    "Tags": {
+                        "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)",
+                        "FSxName.$": "$.FSx.Name",
+                        "Template.$": "$.LaunchTemplate.Id",
+                        "Project": "${Project}"
+                    }
+                }
+            },
+            "ResultPath": "$.ComputeEnvironment",
+            "ResultSelector": {
+                "Arn.$": "$.ComputeEnvironmentArn"
+            },
+            "Next": "waitTenSeconds"
+        },
+        "waitTenSeconds": {
+            "Type": "Wait",
+            "Seconds": 10,
+            "Next": "getComputeEnvironmentStatus"
+        },
+        "getComputeEnvironmentStatus": {
+            "Type": "Task",
+            "InputPath": "$",
+            "Resource": "arn:aws:states:::aws-sdk:batch:describeComputeEnvironments",
+            "Parameters": {
+                "ComputeEnvironments.$": "States.Array($.ComputeEnvironment.Arn)"
+            },
+            "ResultPath": "$.ComputeEnvironmentStatus",
+            "ResultSelector": {
+                "Value.$": "$.ComputeEnvironments[0].Status"
+            },
+            "Next": "choiceComputeEnvironmentReady"
+        },
+        "choiceComputeEnvironmentReady": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.ComputeEnvironmentStatus.Value",
+                    "StringEquals": "VALID",
+                    "Next": "createJobQueue"
+                },
+                {
+                    "Variable": "$.ComputeEnvironmentStatus.Value",
+                    "StringEquals": "CREATING",
+                    "Next": "waitTenSeconds"
+                }
+            ]
+        },
+        "createJobQueue": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:createJobQueue",
+            "Parameters": {
+                "JobQueueName.$": "States.Format('${Project}-{}-Template_{}', $.FSx.Name, $.LaunchTemplate.Id)",
+                "State": "ENABLED",
+                "Priority": 1,
+                "ComputeEnvironmentOrder": [
+                    {
+                        "Order": 1,
+                        "ComputeEnvironment.$": "$.ComputeEnvironment.Arn"
+                    }
+                ],
+                "Tags": {
+                    "Project": "${Project}",
+                    "TemplateName.$": "$.LaunchTemplate.Id",
+                    "FSxName.$": "$.FSx.Name",
+                    "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)"
+                }
+            },
+            "Next": "waitTenSecondsForQueue",
+            "ResultPath": "$.JobQueue",
+            "ResultSelector": {
+                "Arn.$": "$.JobQueueArn"
+            }
+        },
+        "waitTenSecondsForQueue": {
+            "Type": "Wait",
+            "Seconds": 10,
+            "Next": "getJobQueueStatus"
+        },
+        "getJobQueueStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:describeJobQueues",
+            "Parameters": {
+                "JobQueues.$": "States.Array($.JobQueue.Arn)"
+            },
+            "ResultPath": "$.JobQueueStatus",
+            "ResultSelector": {
+                "Value.$": "$.JobQueues[0].Status"
+            },
+            "Next": "choiceJobQueueReady"
+        },
+        "choiceJobQueueReady": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.JobQueueStatus.Value",
+                    "StringEquals": "VALID",
+                    "Next": "waitMinuteForFSx"
+                },
+                {
+                    "Variable": "$.JobQueueStatus.Value",
+                    "StringEquals": "CREATING",
+                    "Next": "waitTenSecondsForQueue"
+                }
+            ]
+        },
+        "waitMinuteForFSx": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "CheckFSxCreated"
+        },
+        "CheckFSxCreated": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:fsx:describeFileSystems",
+            "Parameters": {
+                "FileSystemIds.$": "States.Array($.FSx.Name)"
+            },
+            "ResultPath": "$.FSxStatus",
+            "ResultSelector": {
+                "Value.$": "$.FileSystems[0].Lifecycle"
+            },
+            "Next": "choiceFSxReady"
+        },
+        "choiceFSxReady": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.FSxStatus.Value",
+                    "StringEquals": "AVAILABLE",
+                    "Next": "tagComputeEnv"
+                },
+                {
+                    "Variable": "$.FSxStatus.Value",
+                    "StringEquals": "CREATING",
+                    "Next": "waitMinuteForFSx"
+                }
+            ]
+        },
+        "tagComputeEnv": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:tagResource",
+            "Parameters": {
+                "ResourceArn.$": "$.ComputeEnvironment.Arn",
+                "Tags": {
+                    "Queue.$": "$.JobQueue.Arn",
+                    "FSxName.$": "$.FSx.Name"
+                }
+            },
+            "Next": "passOutputValues",
+            "ResultPath": null
+        },
+        "passOutputValues": {
+            "Type": "Pass",
+            "Next": "MainFlow",
+            "Parameters": {
+                "JobQueueArn.$": "$.JobQueue.Arn",
+                "RDSQuery.$": "$.RDSQuery",
+                "ComputeEnvArn.$": "$.ComputeEnvironment.Arn",
+                "FSxName.$": "$.FSx.Name",
+                "OutputBucket": "${OutputBucket}",
+                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                "DbConnection.$": "$.DbConnection",
+                "AssemblyName.$": "$.AssemblyName",
+                "NucleotideAccession.$": "$.NucleotideAccession",
+                "KrakenDbName.$": "$.KrakenDbName",
+                "FSxId.$": "$.FSx.Name",
+                "LaunchTemplateId.$": "$.LaunchTemplate.Id",
+                "Samples.$": "$.Samples"
+            }
+        },
+        "MainFlow": {
+            "Type": "Parallel",
+            "ResultPath": "$.FlowResult",
+            "OutputPath": "$.FlowResult[0]",
+            "Branches": [
+                {
+                    "StartAt": "prepareReferenceFiles",
+                    "States": {
+                        "prepareReferenceFiles": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "ResultPath": null,
+                            "Parameters": {
+                                "JobName": "prepare-refs",
+                                "JobDefinition": "${BioPython}",
+                                "JobQueue.$": "$.JobQueueArn",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "/scripts/download_references_ncbi_dataset_api.py",
+                                        "--genome_accession_id",
+                                        "Ref::GENOME_ID",
+                                        "--assembly_accession_id",
+                                        "Ref::ASSEMBLY_ID",
+                                        "--output_folder",
+                                        "references/"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "GENOME_ID.$": "$.RefseqAssemblyAccession",
+                                    "ASSEMBLY_ID.$": "$.AssemblyName"
+                                }
+                            },
+                            "Next": "indexReferenceFiles"
+                        },
+                        "indexReferenceFiles": {
+                            "Type": "Parallel",
+                            "ResultPath": null,
+                            "Branches": [
+                                {
+                                    "StartAt": "indexBwa",
+                                    "States": {
+                                        "indexBwa": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "bwa-index",
+                                                "JobDefinition": "${Bwa}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "bwa",
+                                                        "index",
+                                                        "Ref::REFERENCE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "REFERENCE_ID.$": "States.Format('references/{}_{}.fna', $.RefseqAssemblyAccession, $.AssemblyName)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "indexSamtools",
+                                    "States": {
+                                        "indexSamtools": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "samtools-index",
+                                                "JobDefinition": "${Samtools}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "samtools",
+                                                        "faidx",
+                                                        "Ref::REFERENCE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "REFERENCE_ID.$": "States.Format('references/{}_{}.fna', $.RefseqAssemblyAccession, $.AssemblyName)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "indexGatk",
+                                    "States": {
+                                        "indexGatk": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "gatk-index",
+                                                "JobDefinition": "${Gatk}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "gatk",
+                                                        "CreateSequenceDictionary",
+                                                        "--REFERENCE",
+                                                        "Ref::REFERENCE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "REFERENCE_ID.$": "States.Format('references/{}_{}.fna', $.RefseqAssemblyAccession, $.AssemblyName)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "convertingGffToBed",
+                                    "States": {
+                                        "convertingGffToBed": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "gatk-index",
+                                                "JobDefinition": "${BioPython}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/gff_to_bed.py",
+                                                        "--input_gff_file",
+                                                        "Ref::GFF_FILE",
+                                                        "--output_bed_file",
+                                                        "Ref::BED_FILE"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "GFF_FILE.$": "States.Format('references/{}.gff', $.RefseqAssemblyAccession)",
+                                                    "BED_FILE.$": "States.Format('references/{}_WGS.bed', $.RefseqAssemblyAccession)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "extractInsertedVariantsWithID",
+                                    "States": {
+                                        "extractInsertedVariantsWithID" : {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters" : {
+                                                "JobName": "extractInsertedVariants",
+                                                "JobDefinition": "${BioPython}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Environment": [
+                                                        {
+                                                            "Name": "RDS_QUERY",
+                                                            "Value": "SELECT chromosome, position, variant_id, reference_nucleotide, alternative_nucleotide \n FROM public.genphen_variant variant\n ORDER BY position;"
+                                                        },
+                                                        {
+                                                            "Name": "RDS_QUERY_OUTPUT",
+                                                            "Value": "references/variant_ids.tsv"
+                                                        }
+                                                    ],
+                                                    "Command": [
+                                                        "/scripts/query_rds.py",
+                                                        "--db_host",
+                                                        "Ref::ENDPOINT",
+                                                        "--db_name",
+                                                        "Ref::NAME",
+                                                        "--db_user",
+                                                        "Ref::USER",
+                                                        "--db_port",
+                                                        "Ref::PORT",
+                                                        "--aws_region",
+                                                        "Ref::REGION"
+                                                    ],
+                                                    "ResourceRequirements": [
+                                                        {
+                                                            "Type": "MEMORY",
+                                                            "Value": "50004"
+                                                        }
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                                    "NAME.$": "$.DbConnection.Name",
+                                                    "USER.$": "$.DbConnection.User",
+                                                    "PORT.$": "$.DbConnection.Port",
+                                                    "REGION.$": "$.DbConnection.Region"
+                                                }                
+                                            },
+                                            "Next": "compressKnownVariants",
+                                            "ResultPath": null
+                                        },
+                                        "compressKnownVariants": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "compress-variants",
+                                                "JobDefinition": "${Samtools}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "bgzip",
+                                                        "references/variant_ids.tsv"
+                                                    ]
+                                                }
+                                            },
+                                            "Next": "indexKnownVariants",
+                                            "ResultPath": null
+                                        },
+                                        "indexKnownVariants": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "index-variants",
+                                                "JobDefinition": "${Samtools}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "tabix",
+                                                        "--begin",
+                                                        "2",
+                                                        "--end",
+                                                        "2",
+                                                        "references/variant_ids.tsv.gz"
+                                                    ]
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                }
+                            ],
+                            "Next": "VariantCalling"
+                        },
+                        "VariantCalling": {
+                            "Type": "Map",
+                            "MaxConcurrency": 40,
+                            "ResultPath": null,
+                            "ToleratedFailurePercentage": 100,
+                            "ItemsPath": "$.Samples.Value",
+                            "Parameters": {
+                                "SampleId.$": "$$.Map.Item.Value[0]",
+                                "JobQueueArn.$": "$.JobQueueArn",
+                                "DbConnection.$": "$.DbConnection",
+                                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                                "AssemblyName.$": "$.AssemblyName",
+                                "NucleotideAccession.$": "$.NucleotideAccession",
+                                "KrakenDbName.$": "$.KrakenDbName",
+                                "FSxId.$": "$.FSxId",
+                                "LaunchTemplateId.$": "$.LaunchTemplateId",
+                                "ComputeEnvArn.$": "$.ComputeEnvArn",
+                                "OutputBucket.$": "$.OutputBucket"
+                            },
+                            "End": true,
+                            "ItemProcessor": {
+                                "ProcessorConfig": {
+                                    "Mode": "DISTRIBUTED",
+                                    "ExecutionType": "STANDARD"
+                                },
+                                "StartAt": "VariantCallingExecution",
+                                "States": {
+                                    "VariantCallingExecution": {
+                                        "Type": "Task",
+                                        "Resource": "arn:aws:states:::states:startExecution.sync",
+                                        "ResultPath": null,
+                                        "Parameters": {
+                                            "StateMachineArn": "${WorkflowVariantCallingArn}",
+                                            "Input": {
+                                                "SampleId.$": "$.SampleId",
+                                                "JobQueueArn.$": "$.JobQueueArn",
+                                                "DbConnection.$": "$.DbConnection",
+                                                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                                                "AssemblyName.$": "$.AssemblyName",
+                                                "NucleotideAccession.$": "$.NucleotideAccession",
+                                                "KrakenDbName.$": "$.KrakenDbName"
+                                            },
+                                            "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
+                                        },
+                                        "Next": "OverrideVariantCallingResult"
+                                    },
+                                    "OverrideVariantCallingResult": {
+                                        "Type": "Pass",
+                                        "Parameters": null,
+                                        "OutputPath": null,
+                                        "ResultPath": "$",
+                                        "End": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.DataLimitExceeded",
+                        "States.Runtime"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                }
+            ],
+            "Next": "Success"
+        },
+        "Fail": {
+            "Type": "Pass",
+            "Result": {
+                "Value": "Failed"
+            },
+            "ResultPath": "$.ExtractionStatus",
+            "Next": "ParallelDelete"
+        },
+        "Success": {
+            "Type": "Pass",
+            "Result": {
+                "Value": "Succeeded"
+            },
+            "ResultPath": "$.ExtractionStatus",
+            "Next": "checkNonEmptiness"
+        },
+        "checkNonEmptiness": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Samples.Value[0]",
+                    "IsPresent": false,
+                    "Next": "ParallelDelete"
+                }
+            ],
+            "Default": "FlattenSamplesIds"
+        },
+        "FlattenSamplesIds": {
+            "Type": "Map",
+            "ItemsPath": "$.Samples.Value",
+            "Parameters": {
+                "SampleId.$": "$$.Map.Item.Value[0]"
+            },
+            "MaxConcurrency": 0,
+            "Iterator": {
+                "StartAt": "FlattenItem",
+                "States": {
+                    "FlattenItem": {
+                        "Type": "Pass",
+                        "Parameters": {
+                            "res.$": "$.SampleId"
+                        },
+                        "OutputPath": "$.res",
+                        "End": true
+                    }
+                }
+            },
+            "ResultPath": "$.FlattenedSamples",
+            "Next": "UploadToS3"
+        },
+        "UploadToS3": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "ResultPath": null,
+            "Parameters": {
+                "JobName": "upload-to-s3",
+                "JobDefinition": "${BioPython}",
+                "JobQueue.$": "$.JobQueueArn",
+                "ContainerOverrides": {
+                    "Command": [
+                        "/scripts/export_to_s3.py",
+                        "--output_bucket",
+                        "Ref::OutputBucket"
+                    ]
+                },
+                "Parameters": {
+                    "OutputBucket.$": "$.OutputBucket"
+                }
+            },
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.DataLimitExceeded",
+                        "States.Runtime"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "UpdateStatusFailed"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "UpdateStatusFailed"
+                }
+            ],
+            "Next": "UpdateStatus"
+        },
+        "UpdateStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${UpdateStatus}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Uploaded to S3', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Extracted' AND id in %s;",
+                    "QueryParams.$": "States.Array($.FlattenedSamples)"
+                }
+            },
+            "ResultPath": null,
+            "Next": "ParallelDelete"
+        },
+        "UpdateStatusFailed": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${UpdateStatus}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Failed to upload', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Extracted' AND id in %s;",
+                    "QueryParams.$": "States.Array($.FlattenedSamples)"
+                }
+            },
+            "ResultPath": null,
+            "Next": "ParallelDelete"
+        },
+        "ParallelDelete": {
+            "Type": "Parallel",
+            "ResultPath": null,
+            "Branches": [
+                {
+                    "StartAt": "DeleteLaunchTemplate",
+                    "States": {
+                        "DeleteLaunchTemplate": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:ec2:deleteLaunchTemplate",
+                            "Parameters": {
+                                "LaunchTemplateId.$": "$.LaunchTemplateId"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "DeleteFSx",
+                    "States": {
+                        "DeleteFSx": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:fsx:deleteFileSystem",
+                            "Parameters": {
+                                "FileSystemId.$": "$.FSxId"
+                            },
+                            "ResultPath": null,
+                            "Next": "DisableCompEnv"
+                        },
+                        "DisableCompEnv": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:updateComputeEnvironment",
+                            "Parameters": {
+                                "ComputeEnvironment.$": "$.ComputeEnvArn",
+                                "State": "DISABLED"
+                            },
+                            "ResultPath": null,
+                            "Next": "waitTenSecondsComputeEnv"
+                        },
+                        "waitTenSecondsComputeEnv": {
+                            "Type": "Wait",
+                            "Seconds": 10,
+                            "Next": "getComputeEnvState"
+                        },
+                        "getComputeEnvState": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:describeComputeEnvironments",
+                            "Parameters": {
+                                "ComputeEnvironments.$": "States.Array($.ComputeEnvArn)"
+                            },
+                            "ResultPath": "$.ComputeEnvironmentStatus",
+                            "ResultSelector": {
+                                "Value.$": "$.ComputeEnvironments[0].Status"
+                            },
+                            "Next": "choiceComputeEnvDisabled"
+                        },
+                        "choiceComputeEnvDisabled": {
+                            "Type": "Choice",
+                            "Choices": [
+                                {
+                                    "Variable": "$.ComputeEnvironmentStatus.Value",
+                                    "StringEquals": "VALID",
+                                    "Next": "waitTenSecondsJobQueueForEnv"
+                                },
+                                {
+                                    "Variable": "$.ComputeEnvironmentStatus.Value",
+                                    "StringEquals": "UPDATING",
+                                    "Next": "waitTenSecondsComputeEnv"
+                                }
+                            ]
+                        },
+                        "waitTenSecondsJobQueueForEnv": {
+                            "Type": "Wait",
+                            "Seconds": 10,
+                            "Next": "getJobQueueForEnv"
+                        },
+                        "getJobQueueForEnv": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:describeJobQueues",
+                            "Parameters": {
+                                "JobQueues.$": "States.Array($.JobQueueArn)"
+                            },
+                            "ResultPath": "$.JobQueues",
+                            "ResultSelector": {
+                                "Value.$": "$.JobQueues"
+                            },
+                            "Next": "checkJobQueuePresent"
+                        },
+                        "checkJobQueuePresent": {
+                            "Type": "Choice",
+                            "Default": "DeleteComputeEnvironment",
+                            "Choices": [
+                                {
+                                    "And": [
+                                        {
+                                            "Variable": "$.JobQueues.Value",
+                                            "IsPresent": true
+                                        },
+                                        {
+                                            "Variable": "$.JobQueues.Value[0]",
+                                            "IsPresent": true
+                                        }
+                                    ],
+                                    "Next": "waitTenSecondsJobQueueForEnv"
+                                }
+                            ]
+                        },
+                        "DeleteComputeEnvironment": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:deleteComputeEnvironment",
+                            "Parameters": {
+                                "ComputeEnvironment.$": "$.ComputeEnvArn"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "DisableQueue",
+                    "States": {
+                        "DisableQueue": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:updateJobQueue",
+                            "Parameters": {
+                                "JobQueue.$": "$.JobQueueArn",
+                                "State": "DISABLED"
+                            },
+                            "ResultPath": null,
+                            "Next": "waitTenSecondsJobQueue"
+                        },
+                        "waitTenSecondsJobQueue": {
+                            "Type": "Wait",
+                            "Seconds": 10,
+                            "Next": "getJobQueueState"
+                        },
+                        "getJobQueueState": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:describeJobQueues",
+                            "Parameters": {
+                                "JobQueues.$": "States.Array($.JobQueueArn)"
+                            },
+                            "ResultPath": "$.JobQueueStatus",
+                            "ResultSelector": {
+                                "Value.$": "$.JobQueues[0].Status"
+                            },
+                            "Next": "choiceJobQueueDisabled"
+                        },
+                        "choiceJobQueueDisabled": {
+                            "Type": "Choice",
+                            "Choices": [
+                                {
+                                    "Variable": "$.JobQueueStatus.Value",
+                                    "StringEquals": "VALID",
+                                    "Next": "DeleteJobQueue"
+                                },
+                                {
+                                    "Variable": "$.JobQueueStatus.Value",
+                                    "StringEquals": "UPDATING",
+                                    "Next": "waitTenSecondsJobQueue"
+                                }
+                            ]
+                        },
+                        "DeleteJobQueue": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:deleteJobQueue",
+                            "Parameters": {
+                                "JobQueue.$": "$.JobQueueArn"
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "ResourceDeleteFail"
+                }
+            ],
+            "Next": "ChoiceExtractionStatus"
+        },
+        "ResourceDeleteFail": {
+            "Type": "Pass",
+            "End": true
+        },
+        "ChoiceExtractionStatus": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.ExtractionStatus.Value",
+                    "StringEquals": "Failed",
+                    "Next": "FurtherWorkflowFail"
+                }
+            ],
+            "Default": "DataInsertionExecution"
+        },
+        "DataInsertionExecution": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::states:startExecution.sync",
+            "ResultPath": null,
+            "Parameters": {
+                "StateMachineArn": "${WorkflowDataInsertionArn}",
+                "Input": {
+                    "DbConnection.$": "$.DbConnection"
+                },
+                "Name.$": "States.Format('{}', $$.Execution.Name)"
+            },
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "FurtherWorkflowFail"
+                }
+            ],
+            "Next": "VariantAnnotationExecution"
+        },
+        "VariantAnnotationExecution": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::states:startExecution.sync",
+            "ResultPath": null,
+            "Parameters": {
+                "StateMachineArn": "${WorkflowVariantAnnotationArn}",
+                "Input": {
+                    "DbConnection.$": "$.DbConnection",
+                    "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                    "AssemblyName.$": "$.AssemblyName",
+                    "NucleotideAccession.$": "$.NucleotideAccession"
+                },
+                "Name.$": "States.Format('{}', $$.Execution.Name)"
+            },
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "FurtherWorkflowFail"
+                }
+            ],
+            "Next": "StatsCalculationExecution"
+        },
+        "StatsCalculationExecution": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::states:startExecution.sync",
+            "ResultPath": null,
+            "Parameters": {
+                "StateMachineArn": "${WorkflowStatsCalculationArn}",
+                "Input": {
+                    "DbConnection.$": "$.DbConnection"
+                },
+                "Name.$": "States.Format('{}', $$.Execution.Name)"
+            },
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "FurtherWorkflowFail"
+                }
+            ],
+            "End": true
+        },
+        "FurtherWorkflowFail": {
+            "Type": "Pass",
+            "End": true
+        }
+    }
+}

@@ -1,0 +1,139 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines AWS Batch computing resources for secondary analysis pipelines
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow  
+  BatchServiceRoleArn:
+    Description: IAM role used by AWS Batch to launch resources on your behalf
+    Type: String
+  BatchInstanceProfileArn:
+    Description: IAM role used by AWS Batch launched instances to access resources on your behalf
+    Type: String
+  SpotFleetRoleArn:
+    Description: IAM role used by AWS Batch to make Spot instance requests
+    Type: String  
+  PrivateSubnet1Id:
+    Type: String
+  PrivateSubnet2Id:
+    Type: String
+  PrivateSubnet3Id:
+    Type: String
+  SecurityGroupBatchIds:
+    Description: Security groups used by AWS Batch launched instances
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+Resources:
+
+#First all resources for EFS based analyses
+  EFSLaunchTemplate:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - Ebs:
+              # root volume
+              Encrypted: True
+              DeleteOnTermination: True
+              VolumeSize: 30
+              VolumeType: gp2 
+            DeviceName: /dev/xvda
+        TagSpecifications:
+          - ResourceType: volume
+            Tags:
+              - Key: Project
+                Value: !Ref Project
+              - Key: SolutionId
+                Value: !FindInMap ['solution', 'metadata', 'id']
+
+  EFSOnDemandEC2ComputeEnv:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ServiceRole: !Ref BatchServiceRoleArn
+      Type: MANAGED
+      State: ENABLED
+      ComputeEnvironmentName: !Sub ${Project}EFSOnDemandEC2CompEnv
+      ComputeResources:
+        AllocationStrategy: BEST_FIT
+        LaunchTemplate:
+          LaunchTemplateId: !Ref EFSLaunchTemplate
+        SecurityGroupIds: !Ref SecurityGroupBatchIds
+        InstanceRole: !Ref BatchInstanceProfileArn
+        InstanceTypes:
+          - optimal
+        MinvCpus: 0
+        DesiredvCpus: 0
+        MaxvCpus: 256
+        Subnets: 
+          - !Ref PrivateSubnet1Id
+          - !Ref PrivateSubnet2Id
+          - !Ref PrivateSubnet3Id
+        Tags:
+          Name: !Sub ${Project}OnDemandEnv-Worker
+          Project: !Sub ${Project}
+          SolutionId: !FindInMap ['solution', 'metadata', 'id']
+        Type: EC2
+
+  EFSOnDemandQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: !Sub ${Project}EFSOnDemandEC2
+      Priority: 1000
+      State: ENABLED
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref EFSOnDemandEC2ComputeEnv
+
+  EFSOnDemandFargateComputeEnv:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ServiceRole: !Ref BatchServiceRoleArn
+      Type: MANAGED
+      State: ENABLED
+      ComputeEnvironmentName: !Sub ${Project}EFSOnDemandFargate
+      ComputeResources:
+        MaxvCpus: 256
+        SecurityGroupIds: !Ref SecurityGroupBatchIds
+        Subnets:
+          - !Ref PrivateSubnet1Id
+          - !Ref PrivateSubnet2Id
+          - !Ref PrivateSubnet3Id
+        Type: FARGATE
+
+  EFSOnDemandFargateQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: !Sub ${Project}EFSOnDemandFargate
+      Priority: 1000
+      State: ENABLED
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref EFSOnDemandFargateComputeEnv
+
+
+
+Outputs:
+  FargateQueue:
+    Value: !Ref EFSOnDemandFargateQueue
+  HighPriorityQueue:
+    Value: !Ref EFSOnDemandQueue
+
+
+...

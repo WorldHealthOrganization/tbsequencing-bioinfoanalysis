@@ -1,0 +1,30 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "database_name", "postgres_db_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = "dataset", transformation_ctx = "datasource0")
+
+applymapping1 = ApplyMapping.apply(frame = datasource0, mappings = [("datasetname", "string", "dataset_name", "string"), ("datasetorigin", "string", "dataset_origin", "string"), ("datasetowner", "string", "dataset_owner", "string"), ("contactemail", "string", "contact_email", "string"), ("datasettitle", "string", "dataset_title", "string"), ("description", "string", "description", "string"), ("submissiondate", "string", "submission_date", "date")], transformation_ctx = "applymapping1")
+
+selectfields2 = SelectFields.apply(frame = applymapping1, paths = ["description", "dataset_name", "dataset_owner", "contact_email", "dataset_title", "submission_date", "dataset_origin"], transformation_ctx = "selectfields2")
+
+nonull = DropNullFields.apply(frame = selectfields2, transformation_ctx = "nonull")
+
+resolvechoice3 = ResolveChoice.apply(frame = nonull, choice = "MATCH_CATALOG", database =  args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_dataset", transformation_ctx = "resolvechoice3")
+
+resolvechoice4 = ResolveChoice.apply(frame = resolvechoice3, choice = "make_cols", transformation_ctx = "resolvechoice4")
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = resolvechoice4, database =  args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_staged_dataset", transformation_ctx = "datasink5")
+job.commit()

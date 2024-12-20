@@ -1,0 +1,29 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "database_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database =  args["database_name"], table_name = "sample", transformation_ctx = "datasource0")
+
+applymapping1 = ApplyMapping.apply(frame = datasource0, mappings = [("samplename", "string", "sample_name", "string"), ("ncbitaxonid", "int", "ncbi_taxon_id", "int"), ("submissiondate", "string", "submission_date", "string"), ("samplingdate", "string", "sampling_date", "string"), ("additionalgeographicalinformation", "string", "additional_geographical_information", "string"), ("latitude", "string", "latitude", "string"), ("longitude", "string", "longitude", "string"), ("isolationsource", "string", "isolation_source", "string"), ("country", "int", "country_id", "int"), ("libraryname", "string", "library_name", "string"), ("fastqprefix", "string", "prefix", "string"), ("librarypreparationstrategy", "string", "library_preparation_strategy", "string"), ("sequencingplatform", "string", "sequencing_platform", "string"), ("awsbucketregion", "string", "aws_bucket_region", "string"), ("librarylayout", "string", "library_layout", "string")], transformation_ctx = "applymapping1")
+
+selectfields2 = SelectFields.apply(frame = applymapping1, paths = ["country_id", "sample_name", "sra_name", "patiend_id", "latitude", "ncbi_taxon_id", "submission_date", "longitude", "biosample_id", "sampling_date", "isolation_source", "additional_geographical_information", "sample_id", "library_name", "prefix", "library_preparation_strategy", "sequencing_platform", "aws_bucket_region", "library_layout"], transformation_ctx = "selectfields2")
+
+resolvechoice3 = ResolveChoice.apply(frame = selectfields2, choice = "MATCH_CATALOG", database =  args["database_name"], table_name = "postgres_genphensql_staged_sample", transformation_ctx = "resolvechoice3")
+
+resolvechoice4 = ResolveChoice.apply(frame = resolvechoice3, choice = "make_cols", transformation_ctx = "resolvechoice4")
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = resolvechoice4, database =  args["database_name"], table_name = "postgres_genphensql_staged_sample", transformation_ctx = "datasink5")
+
+job.commit()

@@ -1,0 +1,254 @@
+{
+    "Comment": "Per sample analysis workflow. Receives the sample name and a batch queue, starts the analysis and captures errors.",
+    "StartAt": "Initialize",
+    "States": {
+        "Initialize": {
+            "Type": "Pass",
+            "Result": {
+                "Bwa": "${BatchJobDefinitionBwa}",
+                "Samtools": "${BatchJobDefinitionSamtools}",
+                "Bcftools": "${BatchJobDefinitionBcftools}",
+                "Kraken": "${BatchJobDefinitionKraken}",
+                "Gatk": "${BatchJobDefinitionGATK}",
+                "Freebayes": "${BatchJobDefinitionFreebayes}",
+                "Sratools": "${BatchJobDefinitionSraTools}",
+                "Delly": "${BatchJobDefinitionDelly}",
+                "Mosdepth": "${BatchJobDefinitionMosDepth}",
+                "BioPython": "${BatchJobDefinitionBioPython}",
+                "Bedtools": "${BatchJobDefinitionBedtools}",
+                "FastQC": "${BatchJobDefinitionFastQC}"
+            },
+            "ResultPath": "$.JobDefinitions",
+            "Next": "choiceCheckInput"
+        },
+        "choiceCheckInput": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "And": [
+                        {
+                            "Variable": "$.input",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$.input",
+                            "IsString": true
+                        }
+                    ],
+                    "Next": "ConvertStringToJson"
+                }
+            ],
+            "Default": "DescribeBatchQueue"
+        },
+        "ConvertStringToJson": {
+            "Type": "Pass",
+            "Parameters": {
+                "NewInput.$": "States.StringToJson($.input)"
+            },
+            "ResultPath": "$",
+            "OutputPath": "$.NewInput",
+            "Next": "DescribeBatchQueue"
+        },
+        "DescribeBatchQueue": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:batch:describeJobQueues",
+            "Next": "VerifyJobQueue",
+            "Parameters": {
+                "JobQueues.$": "States.Array($.JobQueueArn)"
+            },
+            "ResultPath": "$.JobQueueStatus"
+        },
+        "VerifyJobQueue": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "And": [
+                        {
+                            "Variable": "$.JobQueueStatus.JobQueues[0].JobQueueArn",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$.JobQueueStatus.JobQueues[0].State",
+                            "StringEquals": "ENABLED"
+                        },
+                        {
+                            "Variable": "$.JobQueueStatus.JobQueues[0].Status",
+                            "StringEquals": "VALID"
+                        }
+                    ],
+                    "Next": "getSampleName"
+                }
+            ],
+            "Default": "FailEnd"
+        },
+        "getSampleName": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE v1_sample\n SET    status = 'PROCESSING', last_status_change=now() \n WHERE  id = (\n         SELECT id\n         FROM   v1_sample\n         NATURAL INNER JOIN v1_sequencingdata\n         WHERE  status = 'UNPROCESSED' AND sequencing_platform='ILLUMINA' AND library_layout='PAIRED'\n         ORDER BY data_location DESC\n         LIMIT  1\n         FOR    UPDATE SKIP LOCKED\n         )\n RETURNING id;"
+                }
+            },
+            "ResultPath": "$.SampleId",
+            "ResultSelector": {
+                "Value.$": "$.Payload[0][0]"
+            },
+            "Next": "getLibraryIdsForSample"
+        },
+        "getLibraryIdsForSample": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "SELECT DISTINCT library_name, data_location, CASE WHEN library_preparation_strategy='WGS' THEN 'WGS' WHEN Assay IS NOT NULL THEN Assay ELSE 'drug_resistance_genes' END, array_agg(file_path) FROM v1_sequencingdata NATURAL INNER JOIN v1_sample WHERE v1_sample.id=%s AND sequencing_platform='ILLUMINA' AND library_layout='PAIRED' GROUP BY library_name, data_location, library_preparation_strategy, assay;",
+                    "QueryParams.$": "States.Array($.SampleId.Value)"
+                }
+            },
+            "ResultPath": "$.LibraryIds",
+            "ResultSelector": {
+                "Value.$": "$.Payload"
+            },
+            "Next": "getLibraryCountForSample"
+        },
+        "getLibraryCountForSample": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "SELECT count(DISTINCT library_name) FROM v1_sequencingdata NATURAL INNER JOIN v1_sample WHERE v1_sample.id=%s AND library_layout='PAIRED' AND sequencing_platform='ILLUMINA';",
+                    "QueryParams.$": "States.Array($.SampleId.Value)"
+                }
+            },
+            "ResultPath": "$.LibraryCounts",
+            "ResultSelector": {
+                "Value.$": "$.Payload[0][0]"
+            },
+            "Next": "checkNonEmptiness"
+        },
+        "checkNonEmptiness": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.LibraryCounts.Value",
+                    "NumericEquals": 0,
+                    "Next": "FailEnd"
+                }
+            ],
+            "Default": "VariantCalling"
+        },
+        "PrepParams": {
+            "Type": "Pass",
+            "Result": {
+                "SampleId.$": "$.SampleId.Value",
+                "BatchQueue.$": "$.JobQueueArn",
+                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                "AssemblyName.$": "$.AssemblyName",
+                "ReferenceName.$": "States.Format('{}_{}', $.RefseqAssemblyAccession, $.AssemblyName)",
+                "NucleotideAccession.$": "$.NucleotideAccession",
+                "KrakenDbName.$": "$.KrakenDbName",
+                "LibraryIds": {
+                    "Value.$": "$.LibraryIds.Value"
+                },
+                "LibraryCounts": {
+                    "Value.$": "$.LibraryCounts.Value"
+                }
+            },
+            "ResultPath": "$",
+            "Next": "WaitThirtySeconds"
+        },
+        
+
+        "WaitThirtySeconds": {
+            "Type": "Wait",
+            "Seconds": 30,
+            "Next": "CleanAnalysis"
+        },
+        "CleanAnalysis": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobName": "clean-all",
+                "JobDefinition": "$.JobDefinitions.Samtools",
+                "JobQueue.$": "$.JobQueueArn",
+                "ContainerOverrides": {
+                    "Command": [
+                        "/bin/bash",
+                        "/scripts/clean_all.sh",
+                        "Ref::SAMPLE_ID"
+                    ]
+                },
+                "Parameters": {
+                    "SAMPLE_ID.$": "$.SampleId.Value"
+                }
+            },
+            "Next": "Fail",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Fail",
+                    "ResultPath": null
+                }
+            ]
+        },
+        "Fail": {
+            "Type": "Pass",
+            "Result": {
+                "Value": "FAILED"
+            },
+            "ResultPath": "$.AnalysisStatus",
+            "Next": "UpdateStatus"
+        },
+        "Success": {
+            "Type": "Pass",
+            "Result": {
+                "Value": "SUCCEEDED"
+            },
+            "ResultPath": "$.AnalysisStatus",
+            "Next": "UpdateStatus"
+        },
+        "FailEnd": {
+            "Type": "Fail"
+        },
+        "UpdateStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE v1_sample\n SET    status = %s, last_status_change=now() \n WHERE  id = %s;",
+                    "QueryParams.$": "States.Array($.AnalysisStatus.Value, $.SampleId.Value)"
+                }
+            },
+            "ResultPath": null,
+            "Next": "CleanOutput"
+        },
+        "CleanOutput": {
+            "Type": "Pass",
+            "Parameters": {
+                "DbConnection.$": "$.DbConnection",
+                "JobQueueArn.$": "$.JobQueueArn",
+                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                "AssemblyName.$": "$.AssemblyName",
+                "NucleotideAccession.$": "$.NucleotideAccession",
+                "ReferenceName.$": "$.ReferenceName",
+                "KrakenDbName.$": "$.KrakenDbName"
+            },
+            "ResultPath": "$",
+            "End": true
+        }
+    }
+}

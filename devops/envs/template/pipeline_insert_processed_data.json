@@ -1,0 +1,604 @@
+{
+    "Comment": "Insert all data after sequencing data analysis.",
+    "StartAt": "ConcurrencyProtectionGetStatus",
+    "States": {
+        "ConcurrencyProtectionGetStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+            "Parameters": {
+                "StateMachineArn.$": "$$.StateMachine.Id",
+                "StatusFilter": "RUNNING"
+            },
+            "Next": "ConcurrencyProtectionCheck",
+            "ResultSelector": {
+                "Count.$": "States.ArrayLength($.Executions)",
+                "Items.$": "$.Executions"
+            },
+            "ResultPath": "$.ConcurrencyProtectionRuns"
+        },
+        "ConcurrencyProtectionCheck": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.ConcurrencyProtectionRuns.Count",
+                    "NumericGreaterThan": 1,
+                    "Next": "ConcurrencyProtectionTriggered"
+                }
+            ],
+            "Default": "PrepareStateMachinesArns"
+        },
+        "ConcurrencyProtectionTriggered": {
+            "Type": "Fail",
+            "Error": "ConcurrencyProtectionTriggered",
+            "Cause": "Another instance is running in parallel, skipping this one"
+        },
+        "PrepareStateMachinesArns": {
+            "Type": "Pass",
+            "Parameters": {
+                "StateMachinesArns.$": "States.Array('${WorkflowVariantCallingArn}', '${WorkflowVariantAnnotationArn}')"
+            },
+            "ResultPath": "$.StateMachines",
+            "Next": "GlobalConcurrencyProtectionMap"
+        },
+        "GlobalConcurrencyProtectionMap": {
+            "Type": "Map",
+            "ItemsPath": "$.StateMachines.StateMachinesArns",
+            "MaxConcurrency": 0,
+            "ResultPath": null,
+            "Parameters": {
+                "StateMachineId.$": "$$.Map.Item.Value"
+            },
+            "Next": "getCrawlerNames",
+            "Iterator": {
+                "StartAt": "GlobalConcurrencyProtectionGetStatus",
+                "States": {
+                    "GlobalConcurrencyProtectionGetStatus": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+                        "Parameters": {
+                            "StateMachineArn.$": "$.StateMachineId",
+                            "StatusFilter": "RUNNING"
+                        },
+                        "Next": "GlobalConcurrencyProtectionCheck",
+                        "ResultSelector": {
+                            "Count.$": "States.ArrayLength($.Executions)",
+                            "Items.$": "$.Executions"
+                        },
+                        "ResultPath": "$.GlobalConcurrencyProtectionRuns"
+                    },
+                    "GlobalConcurrencyProtectionCheck": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.GlobalConcurrencyProtectionRuns.Count",
+                                "NumericGreaterThan": 0,
+                                "Next": "GlobalConcurrencyProtectionTriggered"
+                            }
+                        ],
+                        "Default": "GlobalConcurrencyProtectionPassed"
+                    },
+                    "GlobalConcurrencyProtectionTriggered": {
+                        "Type": "Fail",
+                        "Error": "GlobalConcurrencyProtectionTriggered",
+                        "Cause": "Another instance is running in parallel, skipping this one"
+                    },
+                    "GlobalConcurrencyProtectionPassed": {
+                        "Type": "Pass",
+                        "End": true
+                    }
+                }
+            }
+        },
+        "getCrawlerNames": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:glue:getCrawlers",
+            "ResultPath": "$.Crawlers",
+            "Parameters": {},
+            "Next": "MapCheckCrawlers"
+        },
+        "MapCheckCrawlers": {
+            "Type": "Map",
+            "ResultPath": null,
+            "ItemsPath": "$.Crawlers.Crawlers",
+            "Parameters": {
+                "CrawlerName.$": "$$.Map.Item.Value.Name"
+            },
+            "ItemProcessor": {
+                "StartAt": "CheckCrawler",
+                "States": {
+                    "CheckCrawler": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+                        "Parameters": {
+                            "Name.$": "$.CrawlerName"
+                        },
+                        "ResultPath": "$.Status",
+                        "Next": "ChoiceEverRun"
+                    },
+                    "ChoiceEverRun": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.Status.Crawler.LastCrawl",
+                                "IsPresent": false,
+                                "Next": "RunCrawler"
+                            }
+                        ],
+                        "Default": "GetTablesCreated"
+                    },
+                    "RunCrawler": {
+                        "Type": "Task",
+                        "ResultPath": null,
+                        "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+                        "Parameters": {
+                            "Name.$": "$.CrawlerName"
+                        },
+                        "Next": "WaitThirtySeconds"
+                    },
+                    "WaitThirtySeconds": {
+                        "Type": "Wait",
+                        "Seconds": 30,
+                        "Next": "getCrawlerState"
+                    },
+                    "getCrawlerState": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+                        "Parameters": {
+                            "Name.$": "$.CrawlerName"
+                        },
+                        "ResultPath": "$.Status",
+                        "Next": "choiceCrawlerSucceeded"
+                    },
+                    "choiceCrawlerSucceeded": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.Status.Crawler.State",
+                                "StringEquals": "READY",
+                                "Next": "EndCrawler"
+                            },
+                            {
+                                "Variable": "$.Status.Crawler.State",
+                                "StringEquals": "RUNNING",
+                                "Next": "WaitThirtySeconds"
+                            },
+                            {
+                                "Variable": "$.Status.Crawler.State",
+                                "StringEquals": "STOPPING",
+                                "Next": "WaitThirtySeconds"
+                            }
+                        ]
+                    },
+                    "GetTablesCreated": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:glue:getCrawlerMetrics",
+                        "Parameters": {
+                            "CrawlerNameList.$": "States.Array($.CrawlerName)"
+                        },
+                        "ResultPath": "$.CrawlerTablesCreated",
+                        "Next": "CheckTablesCreated"
+                    },
+                    "CheckTablesCreated": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "And": [
+                                    {
+                                        "Variable": "$.CrawlerTablesCreated.CrawlerMetricsList[0].TablesCreated",
+                                        "NumericEquals": 0
+                                    },
+                                    {
+                                        "Variable": "$.CrawlerTablesCreated.CrawlerMetricsList[0].TablesUpdated",
+                                        "NumericEquals": 0
+                                    },
+                                    {
+                                        "Variable": "$.CrawlerTablesCreated.CrawlerMetricsList[0].TablesDeleted",
+                                        "NumericEquals": 0
+                                    }
+                                ],
+                                "Next": "RunCrawler"
+                            }
+                        ],
+                        "Default": "EndCrawler"
+                    },
+                    "EndCrawler": {
+                        "Type": "Pass",
+                        "End": true
+                    }
+                }
+            },
+            "Next": "ParallelGlue"
+        },
+        "ParallelGlue": {
+            "Type": "Parallel",
+            "Branches": [
+                {
+                    "StartAt": "newVariantGenotype",
+                    "States": {
+                        "newVariantGenotype": {
+                            "Type": "Parallel",
+                            "OutputPath": "$[0]",
+                            "Branches": [
+                                {
+                                    "StartAt": "stageNewVariantGenotype",
+                                    "States": {
+                                        "stageNewVariantGenotype": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                                            "ResultPath": null,
+                                            "Parameters": {
+                                                "JobName": "${GlueNewVarGenotypeJobName}",
+                                                "NumberOfWorkers": 8,
+                                                "WorkerType": "G.1X"
+                                            },
+                                            "Next": "insertNewVariantGenotype"
+                                        },
+                                        "insertNewVariantGenotype": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "insertNewVariants",
+                                                "JobQueue": "${FargateQueueArn}",
+                                                "JobDefinition": "${BioPythonFargate}",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/query_rds.py",
+                                                        "--db_host",
+                                                        "Ref::ENDPOINT",
+                                                        "--db_name",
+                                                        "Ref::NAME",
+                                                        "--db_user",
+                                                        "Ref::USER",
+                                                        "--db_port",
+                                                        "Ref::PORT",
+                                                        "--aws_region",
+                                                        "Ref::REGION"
+                                                    ],
+                                                    "Environment": [
+                                                        {
+                                                            "Name": "RDS_QUERY",
+                                                            "Value": "INSERT INTO public.submission_genotype(sample_id, variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value)\n SELECT staged_genotype.sample_id as sample_id, variant.variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value\n FROM genphensql.staged_genotype\n INNER JOIN public.genphen_variant variant ON variant.chromosome=staged_genotype.chromosome\n AND variant.position=staged_genotype.position\n AND variant.reference_nucleotide=staged_genotype.reference_nucleotide\n AND variant.alternative_nucleotide=staged_genotype.alternative_nucleotide;\n"
+                                                        }
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                                    "NAME.$": "$.DbConnection.Name",
+                                                    "USER.$": "$.DbConnection.User",
+                                                    "PORT.$": "$.DbConnection.Port",
+                                                    "REGION.$": "$.DbConnection.Region"
+                                                }
+                                            },
+                                            "Next": "insertMissingMultipleVariants"
+                                        },
+                                        "insertMissingMultipleVariants": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "insertMissingMultipleVariants",
+                                                "JobQueue": "${FargateQueueArn}",
+                                                "JobDefinition": "${BioPythonFargate}",
+                                                "ContainerOverrides": {
+                                                    "ResourceRequirements": [
+                                                        {
+                                                            "Type": "VCPU",
+                                                            "Value": "0.25"
+                                                        },
+                                                        {
+                                                            "Type": "MEMORY",
+                                                            "Value": "512"
+                                                        }
+                                                    ],
+                                                    "Command": [
+                                                        "/scripts/query_rds.py",
+                                                        "--db_host",
+                                                        "Ref::ENDPOINT",
+                                                        "--db_name",
+                                                        "Ref::NAME",
+                                                        "--db_user",
+                                                        "Ref::USER",
+                                                        "--db_port",
+                                                        "Ref::PORT",
+                                                        "--aws_region",
+                                                        "Ref::REGION"
+                                                    ],
+                                                    "Environment": [
+                                                        {
+                                                            "Name": "RDS_QUERY",
+                                                            "Value": "INSERT INTO public.genphen_variant(chromosome, position, reference_nucleotide, alternative_nucleotide)\n SELECT distinct z.chromosome, z.position+z.shift, z.ref, z.alt\n FROM (\n  SELECT variant_id, chromosome, position, regexp_split_to_table(y.reference_nucleotide, '(?=([ATCG])+)') \"ref\", regexp_split_to_table(y.alternative_nucleotide, '(?=([ATCG])+)') \"alt\", generate_series(0, length(reference_nucleotide)-1) \"shift\"\n  FROM (\n    SELECT *\n    FROM public.genphen_variant\n    WHERE length(reference_nucleotide)>1 AND length(reference_nucleotide)=length(alternative_nucleotide)\n    ) y \n) z\n INNER JOIN public.genphen_variant v1 ON v1.variant_id=z.variant_id\n LEFT JOIN public.genphen_variant v2 ON v2.position=(z.position+z.shift) AND v2.reference_nucleotide=z.ref AND v2.alternative_nucleotide=z.alt\n WHERE ref!=alt AND v2.variant_id IS NULL;"
+                                                        }
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                                    "NAME.$": "$.DbConnection.Name",
+                                                    "USER.$": "$.DbConnection.User",
+                                                    "PORT.$": "$.DbConnection.Port",
+                                                    "REGION.$": "$.DbConnection.Region"
+                                                }
+                                            },
+                                            "Next": "deleteStagedGenotypes"
+                                        },
+                                        "deleteStagedGenotypes": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::lambda:invoke",
+                                            "Parameters": {
+                                                "FunctionName": "${LambdaQueryRDS}",
+                                                "Payload": {
+                                                    "DbConnection.$": "$.DbConnection",
+                                                    "CalledFunction": "run_query",
+                                                    "Query": "DELETE FROM genphensql.staged_genotype;"
+                                                }
+                                            },
+                                            "Next": "stageDellyGenotypes"
+                                        },
+                                        "stageDellyGenotypes": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                                            "ResultPath": null,
+                                            "Parameters": {
+                                                "JobName": "${GlueDellyGenotypeJobName}",
+                                                "NumberOfWorkers": 5,
+                                                "WorkerType": "G.1X"
+                                            },
+                                            "Next": "insertDelVariants"
+                                        },
+                                        "insertDelVariants": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                                            "ResultPath": null,
+                                            "Parameters": {
+                                                "JobName": "${GlueDelVariantsJobName}",
+                                                "NumberOfWorkers": 2,
+                                                "WorkerType": "G.1X"
+                                            },
+                                            "Next": "insertDelGenotypes"
+                                        },
+                                        "insertDelGenotypes": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "insertDelGenotypes",
+                                                "JobQueue": "${FargateQueueArn}",
+                                                "JobDefinition": "${BioPythonFargate}",
+                                                "ContainerOverrides": {
+                                                    "ResourceRequirements": [
+                                                        {
+                                                            "Type": "VCPU",
+                                                            "Value": "0.25"
+                                                        },
+                                                        {
+                                                            "Type": "MEMORY",
+                                                            "Value": "512"
+                                                        }
+                                                    ],
+                                                    "Command": [
+                                                        "/scripts/query_rds.py",
+                                                        "--db_host",
+                                                        "Ref::ENDPOINT",
+                                                        "--db_name",
+                                                        "Ref::NAME",
+                                                        "--db_user",
+                                                        "Ref::USER",
+                                                        "--db_port",
+                                                        "Ref::PORT",
+                                                        "--aws_region",
+                                                        "Ref::REGION"
+                                                    ],
+                                                    "Environment": [
+                                                        {
+                                                            "Name": "RDS_QUERY",
+                                                            "Value": "INSERT INTO public.submission_genotype(sample_id, variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value)\n SELECT sample.id as sample_id, variant.variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value\n FROM genphensql.staged_genotype\n INNER JOIN public.submission_sample as sample ON sample.id=staged_genotype.sample_id\n INNER JOIN public.genphen_variant variant ON variant.chromosome=staged_genotype.chromosome\n AND variant.position=staged_genotype.position\n AND length(variant.reference_nucleotide)=((regexp_match(staged_genotype.reference_nucleotide, 'DEL-([0-9]+)'))[1]::int-staged_genotype.position)\n AND variant.alternative_nucleotide=staged_genotype.alternative_nucleotide WHERE staged_genotype.reference_nucleotide SIMILAR TO 'DEL-[0-9]+';\n"
+                                                        }
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                                    "NAME.$": "$.DbConnection.Name",
+                                                    "USER.$": "$.DbConnection.User",
+                                                    "PORT.$": "$.DbConnection.Port",
+                                                    "REGION.$": "$.DbConnection.Region"
+                                                }
+                                            },
+                                            "Next": "deleteStagedGenotypesAgain"
+                                        },
+                                        "deleteStagedGenotypesAgain": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::lambda:invoke",
+                                            "Parameters": {
+                                                "FunctionName": "${LambdaQueryRDS}",
+                                                "Payload": {
+                                                    "DbConnection.$": "$.DbConnection",
+                                                    "CalledFunction": "run_query",
+                                                    "Query": "DELETE FROM genphensql.staged_genotype;"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                }
+                            ],
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.ALL"
+                                    ],
+                                    "ResultPath": "$.Error",
+                                    "Next": "failEndGenotype"
+                                }
+                            ],
+                            "End": true
+                        },
+                        "failEndGenotype": {
+                            "Type": "Pass",
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "insertKnownVariantGenotype",
+                    "States": {
+                        "insertKnownVariantGenotype": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                            "Parameters": {
+                                "JobName": "${GlueGenotypeJobName}",
+                                "NumberOfWorkers": 8,
+                                "WorkerType": "G.1X"
+                            },
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.ALL"
+                                    ],
+                                    "ResultPath": "$.Error",
+                                    "Next": "failEndKnownVariantGenotype"
+                                }
+                            ],
+                            "End": true
+                        },
+                        "failEndKnownVariantGenotype": {
+                            "Type": "Pass",
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "insertTaxonomy",
+                    "States": {
+                        "insertTaxonomy": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                            "Parameters": {
+                                "JobName": "${GlueTaxonomyJobName}"
+                            },
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.ALL"
+                                    ],
+                                    "ResultPath": "$.Error",
+                                    "Next": "failEndTaxonomy"
+                                }
+                            ],
+                            "End": true
+                        },
+                        "failEndTaxonomy": {
+                            "Type": "Pass",
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "insertLocusStats",
+                    "States": {
+                        "insertLocusStats": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                            "Parameters": {
+                                "JobName": "${GlueLocusStatsJobName}",
+                                "NumberOfWorkers": 8,
+                                "WorkerType": "G.1X"
+                            },
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.ALL"
+                                    ],
+                                    "ResultPath": "$.Error",
+                                    "Next": "failEndLocus"
+                                }
+                            ],
+                            "End": true
+                        },
+                        "failEndLocus": {
+                            "Type": "Pass",
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "insertGlobalStats",
+                    "States": {
+                        "insertGlobalStats": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                            "Parameters": {
+                                "JobName": "${GlueGlobalStatsJobName}"
+                            },
+                            "Catch": [
+                                {
+                                    "ErrorEquals": [
+                                        "States.ALL"
+                                    ],
+                                    "ResultPath": "$.Error",
+                                    "Next": "failEndGlobalStats"
+                                }
+                            ],
+                            "End": true
+                        },
+                        "failEndGlobalStats": {
+                            "Type": "Pass",
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Next": "checkFailure"
+        },
+        "checkFailure": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Or": [
+                        {
+                            "Variable": "$[0].Error",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$[1].Error",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$[2].Error",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$[3].Error",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$[4].Error",
+                            "IsPresent": true
+                        }
+                    ],
+                    "Next": "failEnd"
+                }
+            ],
+            "Default": "UpdateStatus"
+        },
+        "failEnd": {
+            "Type": "Fail"
+        },
+        "UpdateStatus": {
+            "Type": "Task",
+            "ResultPath": null,
+            "InputPath": "$[0]",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE public.submission_sample\n SET    bioanalysis_status = 'Inserted', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Uploaded to S3';"
+                }
+            },
+            "End": true
+        }
+    }
+}

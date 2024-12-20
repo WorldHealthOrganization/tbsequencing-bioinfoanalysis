@@ -1,0 +1,73 @@
+import sys
+
+from awsglue.dynamicframe import DynamicFrame
+from awsglue.utils import getResolvedOptions
+from awsglue.job import Job
+from awsglue.context import GlueContext
+
+from pyspark.context import SparkContext
+
+args = getResolvedOptions(
+    sys.argv,
+    ['JOB_NAME', "glue_db_name", "postgres_db_name"]
+)
+
+glueContext = GlueContext(SparkContext().getOrCreate())
+spark = glueContext.spark_session
+job = Job(glueContext)
+
+datasource0 = (
+    glueContext.create_dynamic_frame.from_catalog(
+        database = args["glue_db_name"],
+        table_name = f"{args['postgres_db_name']}_genphensql_staged_genotype",
+    )
+    .select_fields(
+        paths = [
+            "sample_id",
+            "chromosome",
+            "position",
+            "reference_nucleotide",
+            "alternative_nucleotide",
+            "total_dp",
+            "quality",
+            "alternative_ad",
+            "reference_ad",
+            "genotyper",
+            "genotype_value",
+        ]
+    )
+)
+
+variant = (
+    glueContext.create_dynamic_frame.from_catalog(
+        database = args["glue_db_name"],
+        table_name = f"{args['postgres_db_name']}_public_genphen_variant"
+    )
+)
+
+variant_id_genotype = (
+    datasource0
+    .join(
+        ["chromosome", "position", "reference_nucleotide", "alternative_nucleotide"],
+        ["chromosome", "position", "reference_nucleotide", "alternative_nucleotide"],
+        variant,
+    )
+    .select_fields(
+        paths = [
+            "variant_id",
+            "sample_id",
+            "total_dp",
+            "quality",
+            "alternative_ad",
+            "reference_ad",
+            "genotyper",
+            "genotype_value",
+        ]
+    )
+)
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(
+    frame = variant_id_genotype,
+    database = args["glue_db_name"],
+    table_name = f"{args['postgres_db_name']}_public_submission_genotype",
+)

@@ -1,0 +1,153 @@
+name: 'Build and push bioinformatic images'
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: environment
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_push_db-bwa:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-bwa
+      workdir: containers/bwa
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+  
+  build_push_db-bcftools:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-bcftools
+      workdir: containers/bcftools
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+
+  build_push_db-bedtools:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-bedtools
+      workdir: containers/bedtools
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-biopython:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-biopython
+      workdir: containers/biopython
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-delly:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-delly
+      workdir: containers/delly
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-fastqc:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-fastqc
+      workdir: containers/fastqc
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-freebayes:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-freebayes
+      workdir: containers/freebayes
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-gatk:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-gatk
+      workdir: containers/gatk
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-kraken:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-kraken
+      workdir: containers/kraken
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-mosdepth:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-mosdepth
+      workdir: containers/mosdepth
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-perl:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-perl
+      workdir: containers/perl
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-samtools:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-samtools
+      workdir: containers/samtools
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-snpeff:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-snpeff
+      workdir: containers/snpeff
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-sra-tools:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-sra-tools
+      workdir: containers/sra-tools
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}

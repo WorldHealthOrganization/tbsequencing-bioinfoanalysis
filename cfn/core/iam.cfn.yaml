@@ -1,0 +1,489 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines IAM roles for secondary analysis pipelines
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  SamplesBucket:
+    Description: S3 bucket that stores demo samples to be processed
+    Type: String
+  JobResultsBucket:
+    Description: S3 bucket that stores result files
+    Type: String
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+Resources:
+  BatchInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: S3-Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              #Allows access to raw sample data files for transformation
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:RestoreObject
+                Resource:
+                  - !Sub arn:aws:s3:::${SamplesBucket}
+                  - !Sub arn:aws:s3:::${SamplesBucket}/*
+              #Allows writing of insertion-ready files after transformation of sample data files
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${JobResultsBucket}
+                  - !Sub arn:aws:s3:::${JobResultsBucket}/*
+        #Allow db connection by RDS IAM authentication
+        - PolicyName: RDS-Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - rds-db:connect
+                Resource:
+                  - !Sub arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/*
+        #Allow access to the NCBI API key for better NCBI Entrez API queries
+        - PolicyName: SecretManager-Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ncbi-entrez*
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  BatchInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BatchInstanceRole
+      InstanceProfileName: !Ref BatchInstanceRole
+
+  ECSMetabaseTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: AccessMetabaseSecret
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              #Allows access to user and password for metabase db connection in secret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:metabase-*
+
+  SpotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - spotfleet.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole
+
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - batch.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+
+  LambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com                
+            Action:
+              - sts:AssumeRole
+      Policies:        
+        - PolicyName: S3Delete
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+            #Allows getting raw read data copied into FSx Lustre for the raw data reads
+              - Effect: Allow
+                Action:
+                  - s3:listBucket
+                  - s3:getObject
+                Resource:
+                  - arn:aws:s3:::who-drtb-kb-*
+                  - arn:aws:s3:::who-drtb-kb-*/*
+                  - arn:aws:s3:::find-seqtreat*
+                  - arn:aws:s3:::find-seqtreat*/*
+                  - arn:aws:s3:::find-xdr
+                  - arn:aws:s3:::find-xdr/*
+            #Allows cleaning up of the raw read data copied into FSx Lustre at the end of analysis 
+              - Effect: Allow
+                Action:
+                  - s3:deleteObject
+                  - s3:putObject
+                  - s3:listBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${JobResultsBucket}
+                  - !Sub arn:aws:s3:::${JobResultsBucket}/*            
+              - Effect: Allow
+                Action:
+                  - s3:putObjectTagging
+                Resource: '*'
+
+        #RDS IAM Authentication access
+        - PolicyName: RDS-Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - rds-db:connect
+                Resource:
+                - !Sub arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/*
+        - PolicyName: StartJobBatch
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - batch:SubmitJob
+                Resource:
+                - "*"
+      #Needed to create network interfaces
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  GlueExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub glue.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${JobResultsBucket}
+              #Get access to the glue ETL scripts stored in a bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${JobResultsBucket}/*
+                  - Fn::Sub: 
+                    - arn:aws:s3:::${ZoneBucket}/code/glue-jobs/*
+                    - ZoneBucket:
+                        Fn::ImportValue:
+                          !Sub ${ZoneStackName}-ZoneBucket
+              #Allow logging files for SparkUI debugging
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - Fn::Sub: 
+                    - arn:aws:s3:::${LogBucket}/glue*
+                    - LogBucket:
+                        Fn::ImportValue:
+                          !Sub ${ZoneStackName}-LogsBucket
+        - PolicyName: RDS-Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - rds-db:connect
+                Resource:
+                - !Sub arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/*
+
+  StatesExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: BatchAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource:
+                  - !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForBatchJobsRule
+                  - !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForStepFunctionsExecutionRule
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:invokeFunction
+                Resource: '*'
+        - PolicyName: StatesSubmission
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                  - states:StopExecution
+                  - states:DescribeExecution
+                Resource: '*'
+        - PolicyName: Glue
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                  - glue:GetJobRuns
+                  - glue:BatchStopJobRun        
+                Resource: '*'
+        - PolicyName: FSx-Create
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - fsx:CreateFileSystem
+                  - fsx:UpdateFileSystem
+                  - fsx:DescribeFileSystems
+                  - fsx:DeleteFileSystem
+                  - fsx:CreateDataRepositoryTask
+                  - fsx:DescribeDataRepositoryTasks
+                  - fsx:TagResource
+                Resource: '*'
+        #Allows FSx to create a Service Linked Role, which will allow itself to access S3.
+        - PolicyName: IAM-LinkedServiceRoleForFSx
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                Resource: 
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/*
+              - Effect: Allow
+                Action:
+                  - iam:PutRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:PassRole
+                Resource: '*'
+        - PolicyName: EC2-LaunchTemplate
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateLaunchTemplate
+                  - ec2:CreateTags
+                  - ec2:DeleteLaunchTemplate
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeSubnets
+                Resource: "*"
+        - PolicyName: Batch-ManageComputeQueueJobDefs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - batch:CreateComputeEnvironment
+                  - batch:CreateJobQueue
+                  - batch:TagResource
+                  - batch:DescribeComputeEnvironments
+                  - batch:DescribeJobQueues
+                  - batch:DeleteJobQueue
+                  - batch:DeleteComputeEnvironment
+                  - batch:UpdateComputeEnvironment
+                  - batch:UpdateJobQueue
+                  - batch:RegisterJobDefinition
+                  - batch:DeregisterJobDefinition
+                  - batch:SubmitJob
+                  - batch:DescribeJobs
+                  - batch:TerminateJob
+                Resource: '*'
+        - PolicyName: EFS-CreateVolume
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:CreateFileSystem
+                  - elasticfilesystem:CreateMountTarget
+                  - elasticfilesystem:CreateTags
+                  - elasticfilesystem:DeleteFileSystem
+                  - elasticfilesystem:DeleteMountTarget
+                  - elasticfilesystem:DeleteTags
+                  - elasticfilesystem:TagResource
+                  - elasticfilesystem:UntagResource
+                  - elasticfilesystem:DescribeMountTargets
+                Resource: '*'
+        - PolicyName: EC2-Gateways
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNatGateway
+                  - ec2:DeleteNatGateway
+                  - ec2:CreateVpcEndpoint
+                  - ec2:DeleteVpcEndpoint
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                Resource: '*'
+        #FSx needs some rights on the associated bucket
+        - PolicyName: S3-FSx-Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:listBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${JobResultsBucket}
+
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Resources-level permissions are not available for Batch resources.
+
+  EventBridgeInvokeInitiateUpdateDatabaseRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: SFnExecution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: 
+                - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${Project}*
+
+Outputs:
+  BatchServiceRoleArn:
+    Value: !GetAtt BatchServiceRole.Arn
+  BatchInstanceProfileArn:
+    Value: !GetAtt BatchInstanceProfile.Arn
+  BatchInstanceRoleArn:
+    Value: !GetAtt BatchInstanceRole.Arn
+  SpotFleetRoleArn:
+    Value: !GetAtt SpotFleetRole.Arn
+  StatesExecutionRoleArn:
+    Value: !GetAtt StatesExecutionRole.Arn
+  LambdaFunctionRoleArn:
+    Value: !GetAtt LambdaFunctionRole.Arn
+  GlueRoleArn:
+    Value: !GetAtt GlueExecutionRole.Arn
+  EventBridgeRoleArn:
+    Value: !GetAtt EventBridgeInvokeInitiateUpdateDatabaseRole.Arn  
+
+...
