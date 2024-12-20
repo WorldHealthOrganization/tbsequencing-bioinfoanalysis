@@ -1,0 +1,78 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Worfklow to analyse BioProjects
+
+Parameters:
+  ZoneStackName:
+    Type: String
+  StatesExecutionRoleArn:
+    Type: String
+  LambdaCreateMime:
+    Type: String
+  ProjectLowerCase:
+    Type: String
+  FleetRoleArn:
+    Type: String
+  InstanceProfileRoleArn:
+    Type: String
+  ServiceRoleArn:
+    Type: String
+  S3FileVersion:
+    Type: String
+  SecurityGroupId:
+    Type: String
+
+Resources:
+  StateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    Properties:
+      StateMachineName: !Ref "AWS::StackName"
+      RoleArn: !Ref StatesExecutionRoleArn #required
+      DefinitionS3Location:
+        Bucket:
+          Fn::ImportValue:
+            !Sub ${ZoneStackName}-ZoneBucket
+        Key: code/stepfunc-create-comp-resources.json
+        Version: !Ref S3FileVersion
+      DefinitionSubstitutions:
+        LambdaCreateMime: !Ref LambdaCreateMime
+        ProjectLowerCase: !Ref ProjectLowerCase
+        FleetRoleArn: !Ref FleetRoleArn
+        InstanceProfileRoleArn: !Ref InstanceProfileRoleArn
+        ServiceRoleArn: !Ref ServiceRoleArn
+        SecurityGroupId: !Ref SecurityGroupId
+        AWSRegion: !Sub ${AWS::Region}
+
+Outputs:
+  WorkflowArn:
+    Description: Workflow statemachine ARN
+    Value: !Ref StateMachine
+  WorkflowName:
+    Description: Workflow statemachine Name
+    Value: !GetAtt StateMachine.Name
+  WorkflowInput:
+    Description: Example input for workflow statemachine
+    Value: !Sub |-
+        {
+        "Samples" : [
+            ""
+        ],
+        "Query" : [
+                "SELECT ARRAY(SELECT DISTINCT \"Name\" from \"Sample\" LEFT JOIN \"SummarySequencingStats\" ON \"SampleId\"=\"Sample\".\"Id\" INNER JOIN \"SequencingData\" ON \"SequencingData\".\"SampleId\"=\"Sample\".\"Id\" WHERE \"Dataset\" SIMILAR TO %s AND \"SummarySequencingStats\".\"SampleId\" IS NULL LIMIT(2000));",
+                "SELECT ARRAY(SELECT DISTINCT \"Sample\".\"Name\" FROM \"Sample\" INNER JOIN \"SequencingData\" ON (\"SequencingData\".\"SampleId\"=\"Sample\".\"Id\" AND \"DataLocation\"='NCBI' AND \"SequencingPlatform\"='ILLUMINA' AND \"LibraryPreparationStrategy\"='WGS') INNER JOIN \"PhenotypicDrugSusceptibilityTest\" ON \"PhenotypicDrugSusceptibilityTest\".\"SampleId\"=\"Sample\".\"Id\" LEFT JOIN \"SummarySequencingStats\" ON \"Sample\".\"Id\"=\"SummarySequencingStats\".\"SampleId\" WHERE \"SummarySequencingStats\".\"SampleId\" IS NULL ORDER BY \"Sample\".\"Name\" LIMIT(2000));"
+              ],
+        "REFSEQ_ASSEMBLY_ACCESSION": "GCF_000195955.2",
+        "ASSEMBLY_NAME": "ASM19595v2",
+        "NUCLEOTIDE_ACCESSION": "NC_000962.3",
+        "REFERENCE_NAME": "GCF_000195955.2_ASM19595v2",
+        "KRAKEN_DB_NAME": "mycobacterium",
+        "db-connection": {
+                "PORT": "5432",
+                "USER": "db_userx",
+                "NAME": "postgres",
+                "REGION": "us-east-1",
+                "HOST": "database-2.cji4ghqrhoa6.us-east-1.rds.amazonaws.com"
+            }
+        }
+...

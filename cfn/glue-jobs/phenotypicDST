@@ -1,0 +1,71 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from awsglue.dynamicframe import DynamicFrame
+from pyspark.context import SparkContext
+from pyspark.sql.functions import coalesce, col
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "database_name", "postgres_db_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = "phenotypicdst", transformation_ctx = "datasource0").toDF()
+
+sample_name = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sample").toDF().select(col("sample_id").alias("sample_id1"), col("sample_name"), col("sra_name"))
+
+srs_name = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sample").toDF().select(col("sample_id").alias("sample_id3"), col("sra_name"))
+
+srr_name = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sequencing_data").toDF().select(col("sample_id").alias("sample_id2"), col("library_name")).distinct()
+
+drug_code = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_drugsynonym").toDF().where("code=='three_letter_code'").select(col("drug_id").alias("drug_id2"), col("drug_name_synonym"))
+
+drug = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_drug").toDF().select(col("drug_id").alias("drug_id1"), col("drug_name"))
+
+growth_medium = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_growthmedium").toDF()
+
+method = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_gephen_pdsassessmentmethod").toDF()
+
+if datasource0.count():
+    join1 = datasource0.join(drug, datasource0.drug==drug.drug_name, "left").join(drug_code, datasource0.drug==drug_code.drug_name_synonym, "left").withColumn("drug_id", coalesce("drug_id1", "drug_id2"))
+
+    if join1.count():
+        join2 = join1.join(sample_name, join1.samplename==sample_name.sample_name, "left").join(srs_name, join1.samplename==srs_name.sra_name, "left").join(srr_name, join1.samplename==srr_name.library_name, "left").withColumn("sample_id", coalesce("sample_id1", "sample_id2"))
+    else:
+        join2 = join1
+
+    if "mediumname" in join2.columns:
+        join3 = join2.join(growth_medium, join2.mediumname==growth_medium.medium_name, "left")
+    else:
+        join3 = join2
+        
+    if "methodname" in join3.columns:
+        join4 = DynamicFrame.fromDF(join3.join(method, join3.methodname==method.method_name, "left"),
+            glueContext,
+            "join5")
+    else:
+        join4 = DynamicFrame.fromDF(join3, glueContext, "join4")
+else:
+    join4 = DynamicFrame.fromDF(datasource0, glueContext, "join4")
+
+applymapping1 = ApplyMapping.apply(frame = join4, mappings = [("sample_id", "int", "sample_id", "int"), ("drug_id", "int", "drug_id", "int"), ("medium_id", "int", "medium_id", "int"), ("method_id", "int", "method_id", "int"), ("concentration", "double", "concentration", "double"), ("result", "string", "test_result", "string")], transformation_ctx = "applymapping1")
+
+selectfields2 = SelectFields.apply(frame = applymapping1, paths = ["medium_id", "method_id", "test_result", "concentration", "drug_id", "sample_id"], transformation_ctx = "selectfields2")
+
+filter3 = Filter.apply(frame = selectfields2, f = lambda x: x["sample_id"] is not None and x["drug_id"] is not None and x["test_result"] is not None and x["test_result"]!='', transformation_ctx = "filter3")
+
+nonull = DropNullFields.apply(frame = filter3, transformation_ctx = "nonull")
+
+resolvechoice3 = ResolveChoice.apply(frame = nonull, choice = "MATCH_CATALOG", database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_phenotypic_drug_susceptibility_test", transformation_ctx = "resolvechoice3")
+
+resolvechoice4 = ResolveChoice.apply(frame = resolvechoice3, choice = "make_cols", transformation_ctx = "resolvechoice4")
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = resolvechoice4, database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_phenotypic_drug_susceptibility_test", transformation_ctx = "datasink5")
+
+job.commit()

@@ -1,0 +1,245 @@
+import sys, boto3, os
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from pyspark.sql import SQLContext
+from awsglue.dynamicframe import DynamicFrame
+from pyspark.sql.functions import coalesce, col, when, concat_ws, rank, first, collect_set, bround, max, posexplode, split, regexp_replace, arrays_zip, length 
+from pyspark.sql.window import Window
+
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "glue_database_name"])
+
+glueContext = GlueContext(SparkContext.getOrCreate())
+
+spark = glueContext.spark_session
+
+job = Job(glueContext)
+
+#AWS Glue does not incoporate materialized views in its databases
+#So I rewrote the materialized view queries...
+
+sample = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_genphensql_sample").alias("sample")
+
+summary_stats = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_submission_summarysequencingstats")
+
+seq_data = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_genphensql_sequencing_data")
+
+variant = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_genphen_variant").alias("variant1")
+
+vta = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_genphen_varianttoannotation").alias("vta1")
+
+annot = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_enphen_annotation").alias("annot1")
+
+dbxref = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_biosql_dbxref").alias("dbxref")
+
+sqv = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_biosql_seqfeature_qualifier_value").alias("sqv")
+
+sdb = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_biosql_seqfeature_dbxref").alias("sdb")
+
+term = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_biosql_term").alias("term1")
+
+seqfeature = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_biosql_seqfeature").alias("seqfeature")
+
+genotype = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_submission_genotype").alias("genotype")
+
+drug = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_genphen_drug").alias("drug")
+
+phenotypes = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_genphensql_phenotypic_drug_susceptibility_test").alias("phenotypes")
+
+tier = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_genphen_genedrugresistanceassociation").alias("tier")
+
+drug = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_genphen_drugdrug").alias("drug")
+
+
+# Reimplementation of the Materialized View "multiple variant decomposition" in spark
+mvd = variant.where((length("reference_nucleotide")>1)
+            & (length("reference_nucleotide")==length("alternative_nucleotide")))\
+        .withColumn("zipped",
+            arrays_zip(split(regexp_replace(col("reference_nucleotide"), "([ACGT])(?!$)", r"$1,"), ","), split(regexp_replace(col("alternative_nucleotide"), "([ACGT])(?!$)", r"$1,"), ",")).alias("zip"))\
+        .select(col("variant1.variant_id"),
+            col("variant1.position"),
+            posexplode(col("zipped")))\
+        .select(col("variant1.variant_id"),
+            col("variant1.position"),
+            (col("pos")+col("variant1.position")).alias("new_pos"),
+            col("col.*"))\
+        .where(col("0")!=col("1"))\
+        .join(variant.alias("variant2"),
+            (col("variant2.position")==col("new_pos"))
+            & (col("variant2.reference_nucleotide")==col("0"))
+            & (col("variant2.alternative_nucleotide")==col("1")))\
+        .select(col("variant1.variant_id").alias("mnv_id"),
+            col("variant2.variant_id").alias("snv_id"))\
+        .alias("mvd")
+
+# Reimplementation of the View "gene name"
+gene_name = sdb.join(sqv,
+        sqv.seqfeature_id==sdb.seqfeature_id,
+        how="inner")\
+    .join(seqfeature,
+        seqfeature.seqfeature_id==sqv.seqfeature_id,
+        how="inner")\
+    .join(term,
+        (col("term1.term_id")==sqv.term_id) & (col("term1.name")=="gene"),
+        how="inner")\
+    .join(term.alias("term2"),
+        (col("term2.term_id")==seqfeature.type_term_id) & (col("term2.name")=="gene"),
+        how="inner")\
+    .select(col("sdb.dbxref_id").alias("gene_db_crossref_id"),
+        col("sqv.value").alias("gene_name"))\
+    .alias("gene_name")
+
+# Reimplementation of the view "protein id"
+protein_id = dbxref.join(sqv,
+        sqv.value==dbxref.accession,
+        how="inner")\
+    .join(sdb,
+        sdb.seqfeature_id==sqv.seqfeature_id,
+        how="inner")\
+    .where(col("dbname")=='Protein')\
+    .select(col("dbxref.dbxref_id").alias("protein_db_crossref_id"),
+        col("sdb.dbxref_id").alias("gene_db_crossref_id"))\
+    .alias("protein_id")
+    
+# Reimplementation of the mat view "formatted annotation per gene" aka fapg
+fapg = vta.join(annot,
+    col("annot1.annotation_id")==col("vta1.annotation_id"),
+    how="inner")\
+    .join(dbxref,
+    dbxref.dbxref_id==col("annot1.reference_db_crossref_id"),
+    how="inner")\
+    .join(vta.alias("vta2").join(annot.alias("annot2"),
+            col("annot2.annotation_id")==col("vta2.annotation_id"),
+            how="inner")\
+        .join(protein_id,
+            protein_id.protein_db_crossref_id==col("annot2.reference_db_crossref_id"),
+            how="inner")\
+        .alias("protein_annotation"),
+        (col("protein_annotation.variant_id")==col("vta1.variant_id")) & (col("protein_annotation.gene_db_crossref_id")==col("annot1.reference_db_crossref_id")),
+        how="left")\
+    .where(col("protein_annotation.reference_db_crossref_id").isNotNull()
+        | (
+            ((col("annot1.predicted_effect")=="upstream_gene_variant") & (col("annot1.distance_to_reference")<408)) 
+            | (col("annot1.predicted_effect")=="non_coding_transcript_exon_variant")
+        ))\
+    .select(col("vta1.variant_id"),
+        col("annot1.reference_db_crossref_id").alias("gene_id"),
+        col("annot1.predicted_effect"),
+        col("annot1.hgvs_value").alias("nucleotidic_annotation"),
+        col("protein_annotation.hgvs_value").alias("proteic_annotation"),
+        col("annot1.distance_to_reference")
+    ).alias("fapg1")
+
+#Select samples based on their phenotype 
+#Only keep clean samples
+clean_phenotypes = phenotypes.join(
+        drug,
+        drug.drug_id==phenotypes.drug_id,
+        how="inner")\
+    .where(col("drug_name")=='Isoniazid')\
+    .groupBy(col("phenotypes.sample_id"))\
+    .agg(concat_ws("", collect_set(col("phenotypes.test_result"))).alias("concat_results"))\
+    .where(col("concat_results").rlike("^(R+|S+)$"))\
+    .where(col("phenotypes.sample_id").isNotNull())\
+    .select(col("phenotypes.sample_id"),
+        col("concat_results").substr(1, 1).alias("phenotype"))\
+    .alias("clean_phenotypes")
+
+#Beautiful (actually awful) query that associates variant_id to its variant category on the gene of interest
+variant_categories = fapg.join(gene_name, 
+            col("fapg1.gene_id")==gene_name.gene_db_crossref_id,
+            how="left")\
+        .join(tier,
+            tier.gene_db_crossref_id==gene_name.gene_db_crossref_id,  
+            how="inner")\
+        .join(drug,
+            (drug.drug_id==tier.drug_id) & (drug.drug_name=="Isoniazid"),
+            how="inner")\
+        .join(mvd,
+            (col("fapg1.variant_id")==mvd.mnv_id) & (col("fapg1.predicted_effect")=='upstream_gene_variant'),
+            how="left")\
+        .join(fapg.alias("fapg2"),
+            (mvd.snv_id==col("fapg2.variant_id")) & (col("fapg1.gene_id")==col("fapg2.gene_id")),
+            how="left")\
+        .where(~col("fapg1.predicted_effect").isin('downstream_gene_variant', 'synonymous_variant')
+            & ~((col("fapg1.predicted_effect")=='upstream_gene_variant') & (col("fapg1.distance_to_reference")>200)))\
+        .select(col("fapg1.variant_id").alias("variant_id"),
+            col("gene_name"),
+            col("tier"),
+            when(col("fapg1.predicted_effect").rlike(".*(frameshift|stop_gained|start_lost).*"), "lof")
+            .when(col("fapg1.predicted_effect").rlike(".*stop_lost.*"), "stop_lost")
+            .when(col("fapg1.predicted_effect")=='upstream_gene_variant', coalesce(col("fapg2.nucleotidic_annotation"), col("fapg1.nucleotidic_annotation")))
+            .otherwise(col("fapg1.proteic_annotation")).alias("category"))\
+        .withColumn("rank",
+            rank().over(
+                Window.partitionBy(col("variant_id"))\
+                .orderBy(
+                when(col("category")=="lof", 1)\
+                .when(col("category").rlike("^c\..*"), 2)\
+                .otherwise(3))
+            ))\
+        .where(col("rank")==1)\
+        .withColumn("final_category", concat_ws("_", col("gene_name"), col("category")))\
+        .select(col("variant_id"),
+            col("final_category"),
+            col("tier")
+        ).alias("variant_categories")
+                               
+#Filter samples on some sequencing qc stats
+filtered_samples = clean_phenotypes.join(summary_stats,
+        clean_phenotypes.sample_id==summary_stats.sample_id,
+        how="inner")\
+    .join(seq_data,
+        seq_data.sample_id==clean_phenotypes.sample_id,
+        how="inner")\
+    .where((col("sequencing_platform")=="ILLUMINA") 
+        & (col("library_preparation_strategy")=="WGS")
+        & (col("median_depth")>15)
+        & (col("coverage_20x")>0.95))\
+    .select(clean_phenotypes.sample_id,
+        col("phenotype"))\
+    .distinct()\
+    .alias("filtered_samples")
+
+#The final cross join between samples and categories
+final_results = filtered_samples.join(genotype,
+        (genotype.sample_id==filtered_samples.sample_id) & (genotype.genotyper=='freebayes'),
+        how="inner")\
+    .join(variant_categories,
+        variant_categories.variant_id==genotype.variant_id,
+        how="inner")\
+    .withColumn("percent_reads", bround(genotype.alternative_ad.cast("long")/genotype.total_dp.cast("long"), 2))\
+    .where(genotype.quality>100)\
+    .groupBy(col("filtered_samples.sample_id"),
+        col("tier"),
+        col("final_category"))\
+    .agg({"percent_reads": "max"})\
+    .alias("final_results")
+   
+#Adding the phenotype calls
+final=DynamicFrame.fromDF(
+    filtered_samples.join(final_results,
+            (filtered_samples.sample_id==final_results.sample_id),
+            how="left")\
+        .select(col("filtered_samples.sample_id"),
+            col("filtered_samples.phenotype"),
+            col("final_results.tier"),
+            col("final_results.final_category"),
+            col("final_results.max(percent_reads)")),
+    glueContext,
+    "final")
+
+# Script generated for node S3 bucket
+S3bucket_node3 = glueContext.write_dynamic_frame.from_options(
+    frame=final,
+    connection_type="s3",
+    format="csv",
+    connection_options={
+        "path": "s3://aws-glue-assets-231447170434-us-east-1/",
+        "partitionKeys": [],
+    }
+)
+
+job.commit()

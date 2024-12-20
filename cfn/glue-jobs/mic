@@ -1,0 +1,118 @@
+import sys, re
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from awsglue.dynamicframe import DynamicFrame
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql.functions import coalesce, col, lag
+from pyspark.sql.window import Window
+from awsglue.job import Job
+from pyspark.sql.types import DoubleType
+
+#This function corrects the record to create the final MIC value
+def CorrectMICValue(dynamicRecord):
+    #Define regexp for decimal numbers. Some countries use commas instead of dots for decimal separator. 
+    decimal_regexp = r'(\d+[.,]?\d*|[.,]\d+)'
+    #If the value is already in the form of a numeric range (i.e. (2.5, 5]), we (almost) don't need to do anything
+    #We also allow for something very unnatural like "(2,5 , 5,0]"...
+    range_match = re.match(r'(\(|\[)'+decimal_regexp+r','+decimal_regexp+r'(\)|\])', dynamicRecord["value"].replace(" ", ""))
+    if range_match:
+        dynamicRecord["value"] = range_match.group(1) + range_match.group(2).replace(",", ".") + "," + range_match.group(3).replace(",", ".") + range_match.group(4)
+    #If we joined the lower concentration bound using the data we have on microdilution plates plates, then the output is straightforward (it's "(lower_bound, upper_bound]"::varchar)
+    elif dynamicRecord["lower_bound"] is not None:
+        dynamicRecord["value"] = "(" + str(dynamicRecord["lower_bound"]) + "," + dynamicRecord["value"] + "]"
+    else:
+        #Otherwise if the value is a simple number and we don't know the smaller concentration tested, we have no other choices than creating ("[value, value]"::varchar)
+        try:
+            val = float(dynamicRecord["value"].replace(",", "."))
+            dynamicRecord["value"] = "[" + ",".join([str(val)]*2)+ "]"
+        except ValueError:
+            #We can also capture "(equal or) smaller/greater than" signs and create a range
+            sign_match = re.match(r'(≤|≥|[<>]=?)'+ decimal_regexp, dynamicRecord["value"].replace(" ", ""))
+            if sign_match:
+                operator = sign_match.group(1)
+                value = str(float(sign_match.group(2).replace(",",".")))
+                if operator in ["<=", "≤"]:
+                    dynamicRecord["value"] = "(0," + value + "]"
+                elif operator == "<":
+                    dynamicRecord["value"] = "(0," + value + ")"
+                elif operator in [">=", "≥"]:
+                    dynamicRecord["value"] = "[" + value + ",)"
+                elif operator == ">":
+                    dynamicRecord["value"] = "(" + value + ",)"
+            #Otherwise we capture other strings and format them into a proper range
+            #For instance "2.5-5", "2.5or5", "2.5|5"
+            else:
+                other_ranges_match = re.match(decimal_regexp+r'(?:or|/|-)'+decimal_regexp, dynamicRecord["value"])
+                if other_ranges_match:
+                    dynamicRecord["value"] = "("+other_ranges_match.group(1).replace(",", ".")+","+other_ranges_match.group(2).replace(",", ".")+"]"                
+    return dynamicRecord
+
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "database_name", "postgres_db_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+#Reading data (tab seperated files) from S3
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = "mic", transformation_ctx = "datasource0").toDF()
+
+#Resolving sample names. Accepted values for sample identification are:
+#Non-INSDC sample name previously inserted
+#BioSample ids. Regexp: SAM(EA|N)[0-9]+
+#SRS sample id. Regexp: (E|S)RS[0-9]+
+#SRA run id. Regexp: (E|S)RR[0-9]+
+#We use data from the database and perform left joins to associate with the correct sample
+
+sample_name = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sample").toDF().select(col("sample_id").alias("sample_id1"), col("sample_name"), col("sra_name"))
+
+srs_name = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sample").toDF().select(col("sample_id").alias("sample_id3"), col("sra_name"))
+
+srr_name = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sequencing_data").toDF().select(col("sample_id").alias("sample_id2"), col("library_name")).distinct()
+
+#We fetch the different drug codes mapping from the database so that we can resolve correctly the drug
+drug_code = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_drugsynonym").toDF().where("code=='three_letter_code'").select(col("drug_id").alias("drug_id2"), col("drug_name_synonym"))
+
+drug = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_drug").toDF().select(col("drug_id").alias("drug_id1"), col("drug_name"))
+
+#Sometimes the MIC is provided as single value ("5") which is problematic because we don't know what was the next lower concentration that was tested to define a proper range. i.e (2.5, 5] instead of just [5, 5]
+#However, if the MIC was tested using a standard manufactured microdilution plate, we store which concentration was tested for each drug according to the plate used (We have this information about 3 different plates: MYCOTB, UKMYC5, UKMYC6)
+#So we extract these data from the database so that we can resolve the best MIC range possible.
+#The result of this query is that for each (drug, plate, concentration), we obtain the next lower concentration. We partition over plate, drug_id, sort over concentration and use "lag" to do that.
+#When no lower concentration (na), we assign 0.
+concentration_plate = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_microdilution_plate_concentration").toDF().withColumn("lower_bound", lag("concentration").over(Window.partitionBy("plate", "drug_id").orderBy("concentration"))).na.fill(value=0)
+
+#Joins fails with errors if the Spark Data Frames are empty so we need to check before.
+if datasource0.count():
+    join1 = datasource0.join(drug, datasource0.drug==drug.drug_name, "left").join(drug_code, datasource0.drug==drug_code.drug_name_synonym, "left").withColumn("drug_id", coalesce("drug_id1", "drug_id2")).alias("join2")
+    if join1.count():
+        join2 = join1.join(sample_name, join1.samplename==sample_name.sample_name, "left").join(srr_name, join1.samplename==srr_name.library_name, "left").join(srs_name, join1.samplename==srs_name.sra_name, "left").withColumn("sample_id", coalesce(coalesce("sample_id1", "sample_id2"), "sample_id3"))
+        #We join the next lower concentration if we know the MIC microdilution plate and the MIC value is a single number ("5")
+        with_conc = join2.join(concentration_plate, [join2.platename==concentration_plate.plate, join2.drug_id==concentration_plate.drug_id, join2.value.cast(DoubleType())==concentration_plate.concentration], "left").select(col("sample_id"), col("join2.drug_id"), col("platename"), col("value"), col("lower_bound"))
+
+        mapped3 = Map.apply(frame=DynamicFrame.fromDF(with_conc, glueContext, "join2"), f = CorrectMICValue, transformation_ctx="mapped3")
+    else:
+        mapped3 = DynamicFrame.fromDF(join1, glueContext, "join2")
+else:
+    mapped3 = DynamicFrame.fromDF(datasource0, glueContext, "join4")
+
+
+#Usual commands directly from AWS Glue implementation
+applymapping1 = ApplyMapping.apply(frame = mapped3, mappings = [("sample_id", "int", "sample_id", "int"), ("drug_id", "int", "drug_id", "int"), ("platename", "string", "plate", "string"), ("value", "string", "mic_value", "string")], transformation_ctx = "applymapping1")
+
+selectfields2 = SelectFields.apply(frame = applymapping1, paths = ["mic_value", "drug_id", "sample_id", "plate"], transformation_ctx = "selectfields2")
+
+filter3 = Filter.apply(frame = selectfields2, f = lambda x: x["sample_id"] is not None and x["drug_id"] is not None and x["mic_value"] is not None, transformation_ctx = "filter3")
+
+#We use a staging table because Spark does not have numeric range types. So we insert them as text and use another query to convert them to postgresql numeric range type.
+resolvechoice3 = ResolveChoice.apply(frame = filter3, choice = "MATCH_CATALOG", database =  args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_staged_minimum_inhibitory_concentration_test", transformation_ctx = "resolvechoice3")
+
+resolvechoice4 = ResolveChoice.apply(frame = resolvechoice3, choice = "make_cols", transformation_ctx = "resolvechoice4")
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = resolvechoice4, database =  args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_staged_minimum_inhibitory_concentration_test", transformation_ctx = "datasink5")
+
+job.commit()

@@ -1,0 +1,161 @@
+import sys, boto3, re, os, psycopg2
+from psycopg2 import extras
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from pyspark.sql.functions import coalesce, col, when, lit, concat
+
+def check_sequencing_file_on_S3(samplename, bucket, prefix, client):
+    sequencing_bucket = bucket
+    sequencing_key = prefix.split("/", 1)[-1]
+    key = prefix.rsplit("/", 1)[-1]
+    objects = client.list_objects_v2(Bucket=sequencing_bucket, Prefix=sequencing_key+"_")
+    if objects["KeyCount"]==0:
+        #Fix for some Timor-Leste misnamed files
+        if key[:2]=="TL":
+            objects = client.list_objects_v2(Bucket=sequencing_bucket, Prefix=sequencing_key + "/" + key[:2]+"-" + key[2:] +"_")
+        #Fix for FIND samples sequenced at OSR
+        elif re.match(r'^TB[0-9]{16}', samplename):
+            objects = client.list_objects_v2(Bucket=sequencing_bucket, Prefix=sequencing_key + "/Simone Battaglia - " + key + "_")
+    try:
+        if not objects["KeyCount"]%2:
+            return([ (re.match(r'(.*?)(?:_S[0-9]+)?(?:_L?001)?(?:_R?(?:[12]))?(?:_L?001)?\.fastq\.gz$', x["Key"].rsplit("/", 1)[-1]).group(1), sequencing_bucket+"/"+x["Key"]) for x in objects["Contents"]])
+        else:
+            return([])
+    except KeyError:
+        return([])
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "glue_database_name", "database_host", "database_user", "database_port", "postgres_db_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database =  args["glue_database_name"], table_name = "tmptmp", transformation_ctx = "datasource0")
+
+applymapping1 = ApplyMapping.apply(frame = datasource0, mappings = [("samplename", "string", "sample_name", "string"), ("ncbitaxonid", "int", "ncbi_taxon_id", "int"), ("submissiondate", "string", "submission_date", "string"), ("samplingdate", "string", "sampling_date", "string"), ("additionalgeographicalinformation", "string", "additional_geographical_information", "string"), ("latitude", "string", "latitude", "string"), ("longitude", "string", "longitude", "string"), ("isolationsource", "string", "isolation_source", "string"), ("country", "int", "country_id", "int"), ("libraryname", "string", "library_name", "string"), ("fastqprefix", "string", "prefix", "string"), ("librarypreparationstrategy", "string", "library_preparation_strategy", "string"), ("sequencingplatform", "string", "sequencing_platform", "string"), ("bucketname", "string", "bucket_name", "string"), ("librarylayout", "string", "library_layout", "string"), ("countrycode", "string", "country_code", "string"), ("collectionyear", "int", "collection_year", "int")], transformation_ctx = "applymapping1").toDF().alias("sample_name")
+
+country = glueContext.create_dynamic_frame.from_catalog(database =  args["glue_database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_country").toDF().alias("country")
+
+srs_name = glueContext.create_dynamic_frame.from_catalog(database = args["glue_database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sample").toDF().select(col("sample_name"), col("sample_id"), col("sra_name")).alias("srs_name")
+
+srr_name = glueContext.create_dynamic_frame.from_catalog(database = args["glue_database_name"], table_name = f"{args['postgres_db_name']}_genphensql_sequencing_data").toDF().select(col("sample_id"), col("library_name")).distinct().alias("srr_name")
+
+srr_name = srr_name.join(srs_name,
+    srr_name.sample_id==srs_name.sample_id,
+    how="inner")\
+    .select(col("srs_name.sample_name"), col("srr_name.library_name")).distinct().alias("srr_name")
+
+
+sample_data = applymapping1.join(country,
+        applymapping1.country_code==country.three_letters_code,
+        how="left")\
+        .join(srs_name,
+        applymapping1.sample_name==srs_name.sra_name,
+        how="left")\
+        .join(srr_name,
+        applymapping1.sample_name==srr_name.library_name,
+        how="left")\
+        .select(
+        coalesce(coalesce(col("srr_name.sample_name"), col("srs_name.sample_name")), col("sample_name.sample_name")),
+        coalesce(col("country.country_id"), col("sample_name.country_id")).alias("country_id"),
+        coalesce(col("ncbi_taxon_id").cast("int"), lit(1773)).alias("ncbi_taxon_id"),
+        when(col("sampling_date").isNotNull(), concat(lit("["), col("sampling_date"), lit(","), col("sampling_date"), lit("]")))\
+        .when(col("collection_year").isNotNull(), concat(lit("["), col("collection_year").cast("string"), lit("-01-01,"), col("collection_year").cast("string"), lit("-12-31]")))\
+        .alias("sampling_date"),
+        col("submission_date").cast("date").alias("submission_date"),
+        col("additional_geographical_information"),
+        col("latitude"),
+        col("longitude"),
+        col("isolation_source")        
+).collect()
+
+rds_client = boto3.client('rds', region_name=os.environ["AWS_DEFAULT_REGION"])
+token = rds_client.generate_db_auth_token(DBHostname=args["database_host"], Port=args["database_port"], DBUsername=args["database_user"])
+
+conn = psycopg2.connect(host=args["database_host"], port=args["database_port"], database=args["postgres_db_name"], user=args["database_user"], password=token)
+    
+curr = conn.cursor()
+
+extras.execute_values(curr, """
+    INSERT INTO sample(sample_name, country_id, ncbi_taxon_id, sampling_date, submission_date, additional_geographical_information, latitude, longitude, isolation_source)
+    SELECT
+        sample_name,
+        country_id,
+        ncbi_taxon_id,
+        sampling_date::daterange,
+        submission_date::date,
+        additional_geographical_information,
+        latitude,
+        longitude,
+        isolation_source
+    FROM ( 
+        VALUES %s
+    ) entry (sample_name, country_id, ncbi_taxon_id, sampling_date, submission_date, additional_geographical_information, latitude, longitude, isolation_source)    
+    WHERE sample_name NOT SIMILAR TO '[SED]RS[0-9]+'
+    ON CONFLICT (sample_name) DO
+    UPDATE SET
+        country_id = COALESCE(EXCLUDED.country_id, sample.country_id),
+        sampling_date = COALESCE(EXCLUDED.sampling_date, sample.sampling_date),
+        submission_date = COALESCE(EXCLUDED.submission_date, sample.submission_date),
+        additional_geographical_information = COALESCE(EXCLUDED.additional_geographical_information, sample.additional_geographical_information),
+        latitude = COALESCE(EXCLUDED.latitude, sample.latitude),
+        longitude = COALESCE(EXCLUDED.longitude, sample.longitude),
+        isolation_source = COALESCE(EXCLUDED.isolation_source, sample.isolation_source);
+""", sample_data)
+
+conn.commit()
+
+sequencing_data = applymapping1.where(
+    col("bucket_name").isNotNull())\
+    .select(
+    col("sample_name.sample_name"),
+    col("bucket_name"),
+    coalesce(col("prefix"), col("sample_name.sample_name")).alias("prefix"),
+    coalesce(col("library_preparation_strategy"), lit("WGS")).alias("library_preparation_strategy"),
+    coalesce(col("sequencing_platform"), lit("ILLUMINA")).alias("sequencing_platform"),
+    coalesce(col("library_layout"), lit("PAIRED")).alias("library_layout")
+).collect()
+
+s3_clients = {}
+
+for bucket_name in list(set([x[1] for x in sequencing_data if x[1]])):
+    region = boto3.client("s3").get_bucket_location(Bucket=bucket_name)['LocationConstraint']
+    print(region)
+    print(bucket_name)
+    s3_clients[bucket_name] = boto3.client("s3", region)
+    
+for_insertion = []
+for data in sequencing_data:
+    if data[1]:
+        for i in check_sequencing_file_on_S3(data[0], data[1], data[2], s3_clients[data[1]]):
+            for_insertion.append([data[0], i[0], "S3", data[3], data[4], data[5], i[1]])
+
+print(for_insertion)
+
+extras.execute_values(curr, """
+    INSERT INTO "sequencing_data"("sample_id", "library_name", "data_location", "library_preparation_strategy", "sequencing_platform", "library_layout", "file_path")
+    SELECT 
+        sample.sample_id,
+        entry.library_name,
+        entry.data_location,
+        entry.library_preparation_strategy,
+        entry.sequencing_platform,
+        entry.library_layout,
+        entry.file_path
+    FROM (
+        VALUES %s
+    ) entry (sample_name, library_name, data_location, library_preparation_strategy, sequencing_platform, library_layout, file_path)
+    INNER JOIN sample on sample.sample_name=entry.sample_name
+    ON CONFLICT DO NOTHING;
+    """, for_insertion)
+
+conn.commit()
+
+job.commit()
+

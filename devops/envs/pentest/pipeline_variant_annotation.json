@@ -1,0 +1,1201 @@
+{
+    "Comment": "Workflow loading the results from the variant calling",
+    "StartAt": "DefineDefaults",
+    "States": {
+        "DefineDefaults": {
+            "Type": "Pass",
+            "Next": "ApplyDefaults",
+            "ResultPath": "$.InputDefaults",
+            "Parameters": {
+                "AssemblyName": "ASM19595v2",
+                "NucleotideAccession": "NC_000962.3",
+                "RefseqAssemblyAccession": "GCF_000195955.2",
+                "LoadVariantAnnotationMemomy": "100000",
+                "DbConnection": {
+                    "Port": "${DbPort}",
+                    "User": "${DbUser}",
+                    "Name": "${DbName}",
+                    "Region": "${Region}",
+                    "Endpoint": "${DbHost}"
+                }
+            }
+        },
+        "ApplyDefaults": {
+            "Type": "Pass",
+            "Next": "ExtractDefaults",
+            "ResultPath": "$",
+            "Parameters": {
+                "ParametersWithDefaults.$": "States.JsonMerge($.InputDefaults, $$.Execution.Input, false)"
+            }
+        },
+        "ExtractDefaults": {
+            "Type": "Pass",
+            "Next": "ConcurrencyProtectionGetStatus",
+            "ResultPath": "$",
+            "Parameters": {
+                "AssemblyName.$": "$.ParametersWithDefaults.AssemblyName",
+                "NucleotideAccession.$": "$.ParametersWithDefaults.NucleotideAccession",
+                "RefseqAssemblyAccession.$": "$.ParametersWithDefaults.RefseqAssemblyAccession",
+                "LoadVariantAnnotationMemomy.$": "$.ParametersWithDefaults.LoadVariantAnnotationMemomy",
+                "DbConnection.$": "$.ParametersWithDefaults.DbConnection"
+            }
+        },
+        "ConcurrencyProtectionGetStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+            "Parameters": {
+                "StateMachineArn.$": "$$.StateMachine.Id",
+                "StatusFilter": "RUNNING"
+            },
+            "Next": "ConcurrencyProtectionCheck",
+            "ResultSelector": {
+                "Count.$": "States.ArrayLength($.Executions)",
+                "Items.$": "$.Executions"
+            },
+            "ResultPath": "$.ConcurrencyProtectionRuns"
+        },
+        "ConcurrencyProtectionCheck": {
+            "Type": "Choice",
+            "Choices": [{
+                "Variable": "$.ConcurrencyProtectionRuns.Count",
+                "NumericGreaterThan": 1,
+                "Next": "ConcurrencyProtectionTriggered"
+            }],
+            "Default": "PrepareStateMachinesArns"
+        },
+        "ConcurrencyProtectionTriggered": {
+            "Type": "Fail",
+            "Error": "ConcurrencyProtectionTriggered",
+            "Cause": "Another instance is running in parallel, skipping this one"
+        },
+        "PrepareStateMachinesArns": {
+            "Type": "Pass",
+            "Parameters": {
+                "StateMachinesArns.$": "States.Array('${WorkflowDataInsertionArn}', '${WorkflowVariantCallingArn}')"
+            },
+            "ResultPath": "$.StateMachines",
+            "Next": "GlobalConcurrencyProtectionMap"
+        },
+        "GlobalConcurrencyProtectionMap": {
+            "Type": "Map",
+            "ItemsPath": "$.StateMachines.StateMachinesArns",
+            "MaxConcurrency": 0,
+            "ResultPath": null,
+            "Parameters": {
+                "StateMachineId.$": "$$.Map.Item.Value"
+            },
+            "Next": "InitializeWorkflow",
+            "Iterator": {
+                "StartAt": "GlobalConcurrencyProtectionGetStatus",
+                "States": {
+                    "GlobalConcurrencyProtectionGetStatus": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+                        "Parameters": {
+                            "StateMachineArn.$": "$.StateMachineId",
+                            "StatusFilter": "RUNNING"
+                        },
+                        "Next": "GlobalConcurrencyProtectionCheck",
+                        "ResultSelector": {
+                            "Count.$": "States.ArrayLength($.Executions)",
+                            "Items.$": "$.Executions"
+                        },
+                        "ResultPath": "$.GlobalConcurrencyProtectionRuns"
+                    },
+                    "GlobalConcurrencyProtectionCheck": {
+                        "Type": "Choice",
+                        "Choices": [{
+                            "Variable": "$.GlobalConcurrencyProtectionRuns.Count",
+                            "NumericGreaterThan": 0,
+                            "Next": "GlobalConcurrencyProtectionTriggered"
+                        }],
+                        "Default": "GlobalConcurrencyProtectionPassed"
+                    },
+                    "GlobalConcurrencyProtectionTriggered": {
+                        "Type": "Fail",
+                        "Error": "GlobalConcurrencyProtectionTriggered",
+                        "Cause": "Another instance is running in parallel, skipping this one"
+                    },
+                    "GlobalConcurrencyProtectionPassed": {
+                        "Type": "Pass",
+                        "End": true
+                    }
+                }
+            }
+        },
+        "InitializeWorkflow": {
+            "Type": "Pass",
+            "Parameters": {
+                "Name.$": "$$.StateMachine.Name",
+                "Execution.$": "$$.Execution.Name"
+            },
+            "ResultPath": "$.Workflow",
+            "Next": "createEFS"
+        },
+        "createEFS": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:efs:createFileSystem",
+            "Parameters": {
+                "CreationToken.$": "States.ArrayGetItem(States.StringSplit($.Workflow.Execution, '_'), 0)",
+                "ThroughputMode": "bursting",
+                "PerformanceMode": "generalPurpose",
+                "Encrypted": true,
+                "Tags": [
+                    {
+                        "Key": "Prefix",
+                        "Value": "${Prefix}"
+                    },
+                    {
+                        "Key": "Requester",
+                        "Value.$": "States.Format('StateMachine-{}', $.Workflow.Execution)"
+                    }
+                ]
+            },
+            "ResultPath": "$.EFS",
+            "ResultSelector": {
+                "Id.$": "$.FileSystemId",
+                "Arn.$": "$.FileSystemArn"
+            },
+            "Next": "wait30SecondsForEFS"
+        },
+        "wait30SecondsForEFS": {
+            "Type": "Wait",
+            "Seconds": 30,
+            "Next": "parallelCreateMountTarget"
+        },
+        "parallelCreateMountTarget": {
+            "Type": "Parallel",
+            "ResultPath": "$.Mounts",
+            "Branches": [
+                {
+                    "StartAt": "MountSubnet1",
+                    "States": {
+                        "MountSubnet1": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:efs:createMountTarget",
+                            "Parameters": {
+                                "FileSystemId.$": "$.EFS.Id",
+                                "SecurityGroups": [
+                                    "${SecurityGroupId}"
+                                ],
+                                "SubnetId": "${SubnetId1}"
+                            },
+                            "ResultSelector": {
+                                "Id.$": "$.MountTargetId"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "MountSubnet2",
+                    "States": {
+                        "MountSubnet2": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:efs:createMountTarget",
+                            "Parameters": {
+                                "FileSystemId.$": "$.EFS.Id",
+                                "SecurityGroups": [
+                                    "${SecurityGroupId}"
+                                ],
+                                "SubnetId": "${SubnetId2}"
+                            },
+                            "ResultSelector": {
+                                "Id.$": "$.MountTargetId"
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Next": "parallelJobDefinitions"
+        },
+        "parallelJobDefinitions": {
+            "Type": "Parallel",
+            "ResultPath": "$.VarianAnnotationDefinitions",
+            "Branches": [
+                {
+                    "StartAt": "SnpEffJobDefFargate",
+                    "States": {
+                        "SnpEffJobDefFargate": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:registerJobDefinition",
+                            "Parameters": {
+                                "JobDefinitionName.$": "States.Format('${Prefix}-snpeff-fargate-{}', $.Workflow.Execution)",
+                                "Type": "container",
+                                "PlatformCapabilities": [
+                                    "FARGATE"
+                                ],
+                                "ContainerProperties": {
+                                    "FargatePlatformConfiguration": {
+                                        "PlatformVersion": "1.4.0"
+                                    },
+                                    "Image": "${AccountId}.dkr.ecr.${Region}.amazonaws.com/${Project}-genomicsworkflow-snpeff:latest",
+                                    "ExecutionRoleArn": "${InstanceProfileRoleArn}",
+                                    "JobRoleArn": "${JobRoleArn}",
+                                    "Volumes": [
+                                        {
+                                            "Name": "efs",
+                                            "EfsVolumeConfiguration": {
+                                                "FileSystemId.$": "$.EFS.Id"
+                                            }
+                                        }
+                                    ],
+                                    "MountPoints": [
+                                        {
+                                            "ContainerPath": "/scratch",
+                                            "SourceVolume": "efs"
+                                        }
+                                    ],
+                                    "ResourceRequirements": [
+                                        {
+                                            "Type": "VCPU",
+                                            "Value": "0.5"
+                                        },
+                                        {
+                                            "Type": "MEMORY",
+                                            "Value": "1024"
+                                        }
+                                    ]
+                                }
+                            },
+                            "ResultPath": "$",
+                            "ResultSelector": {
+                                "SnpEffFargateArn.$": "$.JobDefinitionArn",
+                                "SnpEffFargateName.$": "$.JobDefinitionName"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "BioPythonJobDefEC2",
+                    "States": {
+                        "BioPythonJobDefEC2": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:registerJobDefinition",
+                            "Parameters": {
+                                "JobDefinitionName.$": "States.Format('${Prefix}-biopython-ec2-{}', $.Workflow.Execution)",
+                                "Type": "container",
+                                "PlatformCapabilities": [
+                                    "EC2"
+                                ],
+                                "ContainerProperties": {
+                                    "Image": "${AccountId}.dkr.ecr.${Region}.amazonaws.com/${Project}-genomicsworkflow-biopython:latest",
+                                    "ExecutionRoleArn": "${InstanceProfileRoleArn}",
+                                    "JobRoleArn": "${JobRoleArn}",
+                                    "Volumes": [
+                                        {
+                                            "Name": "efs",
+                                            "EfsVolumeConfiguration": {
+                                                "FileSystemId.$": "$.EFS.Id"
+                                            }
+                                        }
+                                    ],
+                                    "MountPoints": [
+                                        {
+                                            "ContainerPath": "/scratch",
+                                            "SourceVolume": "efs"
+                                        }
+                                    ],
+                                    "ResourceRequirements": [
+                                        {
+                                            "Type": "VCPU",
+                                            "Value": "1"
+                                        },
+                                        {
+                                            "Type": "MEMORY",
+                                            "Value": "1024"
+                                        }
+                                    ]
+                                }
+                            },
+                            "ResultPath": "$",
+                            "ResultSelector": {
+                                "BioPythonEC2Arn.$": "$.JobDefinitionArn",
+                                "BioPythonEC2Name.$": "$.JobDefinitionName"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "BioPythonFargateJobDef",
+                    "States": {
+                        "BioPythonFargateJobDef": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:registerJobDefinition",
+                            "Parameters": {
+                                "JobDefinitionName.$": "States.Format('${Prefix}-biopython-fargate-{}', $.Workflow.Execution)",
+                                "Type": "container",
+                                "PlatformCapabilities": [
+                                    "FARGATE"
+                                ],
+                                "ContainerProperties": {
+                                    "FargatePlatformConfiguration": {
+                                        "PlatformVersion": "1.4.0"
+                                    },
+                                    "Image": "${AccountId}.dkr.ecr.${Region}.amazonaws.com/${Project}-genomicsworkflow-biopython:latest",
+                                    "ExecutionRoleArn": "${InstanceProfileRoleArn}",
+                                    "JobRoleArn": "${JobRoleArn}",
+                                    "Volumes": [
+                                        {
+                                            "Name": "efs",
+                                            "EfsVolumeConfiguration": {
+                                                "FileSystemId.$": "$.EFS.Id"
+                                            }
+                                        }
+                                    ],
+                                    "MountPoints": [
+                                        {
+                                            "ContainerPath": "/scratch",
+                                            "SourceVolume": "efs"
+                                        }
+                                    ],
+                                    "ResourceRequirements": [
+                                        {
+                                            "Type": "VCPU",
+                                            "Value": "0.5"
+                                        },
+                                        {
+                                            "Type": "MEMORY",
+                                            "Value": "1024"
+                                        }
+                                    ]
+                                }
+                            },
+                            "ResultPath": "$",
+                            "ResultSelector": {
+                                "BioPythonFargateArn.$": "$.JobDefinitionArn",
+                                "BioPythonFargateName.$": "$.JobDefinitionName"
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.Runtime"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                }
+            ],
+            "Next": "waitHalfMinute"
+        },
+        "waitHalfMinute": {
+            "Type": "Wait",
+            "Seconds": 30,
+            "Next": "checkMountTargetStatus"
+        },
+        "checkMountTargetStatus": {
+            "Type": "Task",
+            "ResultPath": "$.MountsLifeCycle",
+            "Resource": "arn:aws:states:::aws-sdk:efs:describeMountTargets",
+            "Parameters": {
+                "FileSystemId.$": "$.EFS.Id"
+            },
+            "ResultSelector": {
+                "State.$": "$.MountTargets[*].LifeCycleState"
+            },
+            "Next": "choiceLifeCycleValues"
+        },
+        "choiceLifeCycleValues": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.MountsLifeCycle.State[0]",
+                    "StringMatches": "available",
+                    "Next": "parallelPrepareVariantsAndSnpEff"
+                }
+            ],
+            "Default": "waitHalfMinute"
+        },
+        "parallelPrepareVariantsAndSnpEff": {
+            "Type": "Parallel",
+            "ResultPath": null,
+            "Branches": [
+                {
+                    "StartAt": "PrepareSnpEff",
+                    "States": {
+                        "PrepareSnpEff": {
+                            "Type": "Parallel",
+                            "ResultPath": null,
+                            "Branches": [
+                                {
+                                    "StartAt": "PrepareReference",
+                                    "States": {
+                                        "PrepareReference": {
+                                            "Type": "Task",
+                                            "InputPath": "$",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "prepare-snpeff",
+                                                "JobDefinition.$": "$.VarianAnnotationDefinitions[2].BioPythonFargateArn",
+                                                "JobQueue": "${FargateQueueArn}",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/fix_gff_for_snpEff.py",
+                                                        "--genome_accession_id",
+                                                        "Ref::GENOME_ID",
+                                                        "--assembly_accession_id",
+                                                        "Ref::ASSEMBLY_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "GENOME_ID.$": "$.RefseqAssemblyAccession",
+                                                    "ASSEMBLY_ID.$": "$.AssemblyName"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "PrepareConfig",
+                                    "States": {
+                                        "PrepareConfig": {
+                                            "Type": "Task",
+                                            "InputPath": "$",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "prepare-config",
+                                                "JobDefinition.$": "$.VarianAnnotationDefinitions[2].BioPythonFargateArn",
+                                                "JobQueue": "${FargateQueueArn}",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/create_snpEff_config_file.py",
+                                                        "--nucleotide_accession_id",
+                                                        "Ref::NUCLEOTIDE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "NUCLEOTIDE_ID.$": "$.NucleotideAccession"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "PrepareConfigFake",
+                                    "States": {
+                                        "PrepareConfigFake": {
+                                            "Type": "Task",
+                                            "InputPath": "$",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "prepare-config",
+                                                "JobDefinition.$": "$.VarianAnnotationDefinitions[2].BioPythonFargateArn",
+                                                "JobQueue": "${FargateQueueArn}",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/create_snpEff_config_file.py",
+                                                        "--nucleotide_accession_id",
+                                                        "Ref::NUCLEOTIDE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "NUCLEOTIDE_ID.$": "States.Format('{}_fake_dnaA', $.NucleotideAccession)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                }
+                            ],
+                            "Next": "BuildSnpEff"
+                        },
+                        "BuildSnpEff": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "snpeff-build",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[0].SnpEffFargateArn",
+                                "JobQueue": "${FargateQueueArn}",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "/bin/bash",
+                                        "-c",
+                                        "Ref::COMMAND"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "COMMAND.$": "States.Format('mkdir -p data/{} && mv sequences.fa data/{} && mv genes.gff data/{} && snpEff build -gff3 -nodownload -v -config snpEff_{}.config {}', $.NucleotideAccession, $.NucleotideAccession, $.NucleotideAccession, $.NucleotideAccession, $.NucleotideAccession)"
+                                }
+                            },
+                            "Next": "BuildFakeSnpEff"
+                        },
+                        "BuildFakeSnpEff": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "snpeff-build",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[0].SnpEffFargateArn",
+                                "JobQueue": "${FargateQueueArn}",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "/bin/bash",
+                                        "-c",
+                                        "Ref::COMMAND"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "COMMAND.$": "States.Format('mkdir -p data/{}_fake_dnaA && mv sequences-fake.fa data/{}_fake_dnaA/sequences.fa && mv genes-fake.gff data/{}_fake_dnaA/genes.gff && snpEff build -gff3 -nodownload -v -config snpEff_{}_fake_dnaA.config {}_fake_dnaA', $.NucleotideAccession, $.NucleotideAccession, $.NucleotideAccession, $.NucleotideAccession, $.NucleotideAccession)"
+                                }
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "ExtractVariants",
+                    "States": {
+                        "ExtractVariants": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "extract-unannotated-variants",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[1].BioPythonEC2Arn",
+                                "JobQueue": "${EC2QueueArn}",
+                                "ContainerOverrides": {
+                                    "Environment": [
+                                        {
+                                            "Name": "RDS_QUERY",
+                                            "Value": "SELECT chromosome, position, variant.variant_id, reference_nucleotide, alternative_nucleotide\n FROM public.genphen_variant variant\n NATURAL LEFT JOIN public.genphen_varianttoannotation\n WHERE genphen_varianttoannotation.annotation_id IS NULL AND alternative_nucleotide!='*'\n ORDER BY position;"
+                                        },
+                                        {
+                                            "Name": "RDS_QUERY_OUTPUT",
+                                            "Value": "to_be_annotated.tsv"
+                                        }
+                                    ],
+                                    "Command": [
+                                        "/scripts/query_rds.py",
+                                        "--db_host",
+                                        "Ref::ENDPOINT",
+                                        "--db_name",
+                                        "Ref::NAME",
+                                        "--db_user",
+                                        "Ref::USER",
+                                        "--db_port",
+                                        "Ref::PORT",
+                                        "--aws_region",
+                                        "Ref::REGION"
+                                    ],
+                                    "ResourceRequirements": [
+                                        {
+                                            "Type": "VCPU",
+                                            "Value": "1"
+                                        },
+                                        {
+                                            "Type": "MEMORY",
+                                            "Value.$": "$.LoadVariantAnnotationMemomy"
+                                        }
+                                    ]
+                                },
+                                "Parameters": {
+                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                    "NAME.$": "$.DbConnection.Name",
+                                    "USER.$": "$.DbConnection.User",
+                                    "PORT.$": "$.DbConnection.Port",
+                                    "REGION.$": "$.DbConnection.Region"
+                                }
+                            },
+                            "Next": "ExtractFakeVariantDnaA"
+                        },
+                        "ExtractFakeVariantDnaA": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "extract-unannotated-variants",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[2].BioPythonFargateArn",
+                                "JobQueue": "${FargateQueueArn}",
+                                "ContainerOverrides": {
+                                    "Environment": [
+                                        {
+                                            "Name": "RDS_QUERY",
+                                            "Value": "SELECT 'NC_000962.3_fake_dnaA', position-4411132, variant.variant_id, reference_nucleotide, alternative_nucleotide\n FROM public.genphen_variant variant\n WHERE alternative_nucleotide!='*' AND position>=4411133\n ORDER BY position;"
+                                        },
+                                        {
+                                            "Name": "RDS_QUERY_OUTPUT",
+                                            "Value": "to_be_annotated_fake_variant.tsv"
+                                        }
+                                    ],
+                                    "Command": [
+                                        "/scripts/query_rds.py",
+                                        "--db_host",
+                                        "Ref::ENDPOINT",
+                                        "--db_name",
+                                        "Ref::NAME",
+                                        "--db_user",
+                                        "Ref::USER",
+                                        "--db_port",
+                                        "Ref::PORT",
+                                        "--aws_region",
+                                        "Ref::REGION"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                    "NAME.$": "$.DbConnection.Name",
+                                    "USER.$": "$.DbConnection.User",
+                                    "PORT.$": "$.DbConnection.Port",
+                                    "REGION.$": "$.DbConnection.Region"
+                                }
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.Runtime"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                }
+            ],
+            "Next": "AnnotateVariantsFlow"
+        },
+        "AnnotateVariantsFlow": {
+            "Type": "Parallel",
+            "ResultPath": "$.FlowResult",
+            "OutputPath": "$.FlowResult[0]",
+            "Branches": [
+                {
+                    "StartAt": "AnnotateNewVariants",
+                    "States": {
+                        "AnnotateNewVariants": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "annotatevariants",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[0].SnpEffFargateArn",
+                                "JobQueue": "${FargateQueueArn}",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "/bin/bash",
+                                        "-c",
+                                        "Ref::COMMAND"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "COMMAND.$": "States.Format('mv to_be_annotated.tsv tmp.vcf && snpEff ann -config snpEff_{}.config -upDownStreamLen 2000 -spliceSiteSize 0 -spliceRegionExonSize 0 -spliceRegionIntronMax 0 -spliceRegionIntronMin 0 {} tmp.vcf | grep -v \\'^#\\' | cut -f3,8 > annotated.txt', $.NucleotideAccession, $.NucleotideAccession)"
+                                }
+                            },
+                            "Next": "AnnotateFakeDnaAVariants"
+                        },
+                        "AnnotateFakeDnaAVariants": {
+                            "Type": "Task",
+                            "InputPath": "$",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "annotatevariants",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[0].SnpEffFargateArn",
+                                "JobQueue": "${FargateQueueArn}",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "/bin/bash",
+                                        "-c",
+                                        "Ref::COMMAND"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "COMMAND.$": "States.Format('mv to_be_annotated_fake_variant.tsv tmp.vcf && snpEff ann -config snpEff_{}_fake_dnaA.config -upDownStreamLen 2000 -spliceSiteSize 0 -spliceRegionExonSize 0 -spliceRegionIntronMax 0 -spliceRegionIntronMin 0 {}_fake_dnaA tmp.vcf | grep -v \\'^#\\' | cut -f3,8 >> annotated.txt', $.NucleotideAccession, $.NucleotideAccession)"
+                                }
+                            },
+                            "Next": "LoadVariantsAnnotation"
+                        },
+                        "LoadVariantsAnnotation": {
+                            "Type": "Task",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "loadvariantannotations",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[1].BioPythonEC2Arn",
+                                "JobQueue": "${EC2QueueArn}",
+                                "ContainerOverrides": {
+                                    "ResourceRequirements": [
+                                        {
+                                            "Type": "VCPU",
+                                            "Value": "2"
+                                        },
+                                        {
+                                            "Type": "MEMORY",
+                                            "Value.$": "$.LoadVariantAnnotationMemomy"
+                                        }
+                                    ],
+                                    "Command": [
+                                        "/scripts/load_annotation_variants.py",
+                                        "--db_host",
+                                        "Ref::ENDPOINT",
+                                        "--db_name",
+                                        "Ref::NAME",
+                                        "--db_user",
+                                        "Ref::USER",
+                                        "--db_port",
+                                        "Ref::PORT",
+                                        "--aws_region",
+                                        "Ref::REGION"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                    "NAME.$": "$.DbConnection.Name",
+                                    "USER.$": "$.DbConnection.User",
+                                    "PORT.$": "$.DbConnection.Port",
+                                    "REGION.$": "$.DbConnection.Region"
+                                }
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.Runtime"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                }
+            ],
+            "Next": "deregisterDeleteInsert"
+        },
+        "Fail": {
+            "Type": "Pass",
+            "Next": "deregisterDeleteInsert",
+            "Result": {
+                "Value": "True"
+            },
+            "ResultPath": "$.FailureStatus"
+        },
+        "deregisterDeleteInsert": {
+            "Type": "Parallel",
+            "ResultPath": null,
+            "Branches": [
+                {
+                    "StartAt": "deregisterSnpEff",
+                    "States": {
+                        "deregisterSnpEff": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:deregisterJobDefinition",
+                            "Parameters": {
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[0].SnpEffFargateArn"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "deregisterBioPythonFargate",
+                    "States": {
+                        "deregisterBioPythonFargate": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:deregisterJobDefinition",
+                            "Parameters": {
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[2].BioPythonFargateArn"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "deregisterBioPythonEc2",
+                    "States": {
+                        "deregisterBioPythonEc2": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:batch:deregisterJobDefinition",
+                            "Parameters": {
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[1].BioPythonEC2Arn"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "deleteMounts",
+                    "States": {
+                        "deleteMounts": {
+                            "Type": "Parallel",
+                            "ResultPath": null,
+                            "Branches": [
+                                {
+                                    "StartAt": "deleteMount1",
+                                    "States": {
+                                        "deleteMount1": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::aws-sdk:efs:deleteMountTarget",
+                                            "Parameters": {
+                                                "MountTargetId.$": "$.Mounts[0].Id"
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "deleteMount2",
+                                    "States": {
+                                        "deleteMount2": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::aws-sdk:efs:deleteMountTarget",
+                                            "Parameters": {
+                                                "MountTargetId.$": "$.Mounts[1].Id"
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                }
+                            ],
+                            "Next": "waitThirtySeconds"
+                        },
+                        "waitThirtySeconds": {
+                            "Type": "Wait",
+                            "Seconds": 30,
+                            "Next": "deleteEFS"
+                        },
+                        "deleteEFS": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:efs:deleteFileSystem",
+                            "Parameters": {
+                                "FileSystemId.$": "$.EFS.Id"
+                            },
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Next": "CheckFailureStatus"
+        },
+        "CheckFailureStatus":{
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.FailureStatus",
+                    "IsPresent": true,
+                    "Next": "FailEnd"
+                }
+            ],
+            "Default": "ProcessDbTables"
+
+        },
+        "FailEnd":{
+            "Type":"Fail"
+        },
+        "ProcessDbTables": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "ResultPath": null,
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "INSERT INTO public.genphen_annotation(predicted_effect, reference_db_crossref_id, hgvs_value, distance_to_reference)\n    SELECT predicted_effect,\n           genphen_locustag.gene_db_crossref_id,\n           staged_variant_to_annotation.hgvs_value,\n           min(distance_to_reference)\n    FROM genphensql.staged_variant_to_annotation\n    NATURAL INNER JOIN public.genphen_locustag\n    WHERE staged_variant_to_annotation.type='nucleotidic'\n    GROUP BY (predicted_effect,\n             genphen_locustag.gene_db_crossref_id,\n             staged_variant_to_annotation.hgvs_value)\n    ON CONFLICT DO NOTHING;\n"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "insertNewProteicAnnotation"
+        },
+        "insertNewProteicAnnotation": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "INSERT INTO public.genphen_annotation(predicted_effect, reference_db_crossref_id, hgvs_value, distance_to_reference)\n    SELECT staged_variant_to_annotation.predicted_effect,\n           genphen_proteinid.protein_db_crossref_id,\n           staged_variant_to_annotation.hgvs_value,\n           min(staged_variant_to_annotation.distance_to_reference)\n    FROM genphensql.staged_variant_to_annotation\n    NATURAL INNER JOIN public.genphen_locustag\n    NATURAL INNER JOIN public.genphen_proteinid\n    WHERE staged_variant_to_annotation.type='proteic'\n    GROUP BY (staged_variant_to_annotation.predicted_effect,\n              genphen_proteinid.protein_db_crossref_id,\n              staged_variant_to_annotation.hgvs_value)\n    ON CONFLICT DO NOTHING;\n"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "insertNewLinkVariantNucleotidicAnnotation"
+        },
+        "insertNewLinkVariantNucleotidicAnnotation": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "INSERT INTO public.genphen_varianttoannotation(variant_id, annotation_id)\n    SELECT DISTINCT variant_id,\n           annotation.annotation_id\n    FROM public.genphen_annotation annotation\n    INNER JOIN public.genphen_locustag ON genphen_locustag.gene_db_crossref_id=annotation.reference_db_crossref_id\n    INNER JOIN genphensql.staged_variant_to_annotation \n        ON genphen_locustag.locus_tag_name=staged_variant_to_annotation.locus_tag_name\n        AND annotation.hgvs_value=staged_variant_to_annotation.hgvs_value \n        AND annotation.predicted_effect=staged_variant_to_annotation.predicted_effect\n    ON CONFLICT DO NOTHING;\n"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "insertNewLinkVariantProteicAnnotation"
+        },
+        "insertNewLinkVariantProteicAnnotation": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "INSERT INTO public.genphen_varianttoannotation(variant_id, annotation_id)\n    SELECT DISTINCT variant_id,\n           annotation.annotation_id\n    FROM public.genphen_annotation annotation\n    INNER JOIN public.genphen_proteinid ON genphen_proteinid.protein_db_crossref_id=annotation.reference_db_crossref_id\n    NATURAL INNER JOIN public.genphen_locustag\n    INNER JOIN genphensql.staged_variant_to_annotation\n        ON genphen_locustag.locus_tag_name=staged_variant_to_annotation.locus_tag_name\n        AND annotation.hgvs_value=staged_variant_to_annotation.hgvs_value\n        AND annotation.predicted_effect=staged_variant_to_annotation.predicted_effect\n    ON CONFLICT DO NOTHING;\n"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "cleanUpAnnotationTables"
+        },
+        "cleanUpAnnotationTables": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "DELETE FROM genphensql.staged_variant_to_annotation;\n   DROP INDEX IF EXISTS public.rankedannot_variant_id_idx;\n    DROP INDEX IF EXISTS public.rankedannot_annotation_id_idx;\n    DROP INDEX IF EXISTS public.preferredannot_variant_id_idx;\n       REFRESH MATERIALIZED VIEW public.genphen_rankedannotation;\n    REFRESH MATERIALIZED VIEW public.genphen_preferredannotation;\n    CREATE INDEX rankedannot_variant_id_idx ON public.genphen_rankedannotation(variant_id);\n    CREATE INDEX rankedannot_annotation_id_idx ON public.genphen_rankedannotation(annotation_id);\n    CREATE INDEX preferredannot_variant_id_idx ON public.genphen_preferredannotation(variant_id);\n"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "WriteFormattedAnnotationPerGene"
+        },
+        "WriteFormattedAnnotationPerGene": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "${GlueWriteFormattedAnnotationPerGeneJobName}"
+            },
+            "Next": "RunPredictResistanceGlueJob"
+        },
+        "RunPredictResistanceGlueJob": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "${GluePredictResistanceJobName}"
+            },
+            "Next": "UpdateStatus"
+        },
+        "UpdateStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${UpdateStatus}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Annotated', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Inserted';"
+                }
+            },
+            "ResultPath": null,
+            "End": true
+        }
+    }
+}

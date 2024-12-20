@@ -1,0 +1,268 @@
+{
+    "Comment": "Master pipeline for analysis workflow.",
+    "StartAt": "ParallelDelete",
+    "States": {
+        "ParallelDelete": {
+            "Type": "Parallel",
+            "ResultPath": null,
+            "Branches": [
+                {
+                    "StartAt": "GetLaunchTemplate",
+                    "States": {
+                        "GetLaunchTemplate": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:ec2:describeLaunchTemplates",
+                            "Parameters": {
+                                "Filters": [
+                                    {
+                                        "Name": "tag:FSxName",
+                                        "Values.$": "States.Array($.FSxName)"
+                                    }
+                                ]
+                            },
+                            "ResultSelector": {
+                                "LaunchTemplateId.$": "$.LaunchTemplates[0].LaunchTemplateId"
+                            },
+                            "Next": "DeleteLaunchTemplate"
+                        },
+                        "DeleteLaunchTemplate": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:ec2:deleteLaunchTemplate",
+                            "Parameters": {
+                                "LaunchTemplateId.$": "$.LaunchTemplateId"
+                            },
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "DeleteFSx",
+                    "States": {
+                        "DeleteFSx": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:fsx:deleteFileSystem",
+                            "Parameters": {
+                                "FileSystemId.$": "$.FSxName"
+                            },
+                            "ResultPath": null,
+                            "End": true
+                        }
+                    }
+                },
+                {
+                    "StartAt": "GetQueue",
+                    "States": {
+                        "GetQueue": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:resourcegroupstaggingapi:getResources",
+                            "Parameters": {
+                                "TagFilters": [
+                                    {
+                                        "Key": "FSxName",
+                                        "Values.$": "States.Array($.FSxName)"
+                                    }
+                                ],
+                                "ResourceTypeFilters": [
+                                    "batch:job-queue"
+                                ]
+                            },
+                            "ResultSelector": {
+                                "Arn.$": "$.ResourceTagMappingList[0].ResourceARN"
+                            },
+                            "ResultPath": "$.JobQueue",
+                            "Next": "GetComputeEnv"
+                        },
+                        "GetComputeEnv": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::aws-sdk:resourcegroupstaggingapi:getResources",
+                            "Parameters": {
+                                "TagFilters": [
+                                    {
+                                        "Key": "FSxName",
+                                        "Values.$": "States.Array($.FSxName)"
+                                    }
+                                ],
+                                "ResourceTypeFilters": [
+                                    "batch:compute-environment"
+                                ]
+                            },
+                            "ResultSelector": {
+                                "Arn.$": "$.ResourceTagMappingList[0].ResourceARN"
+                            },
+                            "ResultPath": "$.ComputeEnv",
+                            "Next": "ParralelDelete"
+                        },
+                        "ParralelDelete": {
+                            "Type": "Parallel",
+                            "End": true,
+                            "Branches": [
+                                {
+                                    "StartAt": "DisableQueue",
+                                    "States": {
+                                        "DisableQueue": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::aws-sdk:batch:updateJobQueue",
+                                            "Parameters": {
+                                                "JobQueue.$": "$.JobQueue.Arn",
+                                                "State": "DISABLED"
+                                            },
+                                            "ResultPath": null,
+                                            "Next": "waitTenSecondsJobQueue"
+                                        },
+                                        "waitTenSecondsJobQueue": {
+                                            "Type": "Wait",
+                                            "Seconds": 10,
+                                            "Next": "getJobQueueState"
+                                        },
+                                        "getJobQueueState": {
+                                            "Type": "Task",
+                                            "InputPath": "$",
+                                            "Resource": "arn:aws:states:::aws-sdk:batch:describeJobQueues",
+                                            "Parameters": {
+                                                "JobQueues.$": "States.Array($.JobQueue.Arn)"
+                                            },
+                                            "ResultPath": "$.JobQueueStatus",
+                                            "ResultSelector": {
+                                                "Value.$": "$.JobQueues[0].Status"
+                                            },
+                                            "Next": "choiceJobQueueDisabled"
+                                        },
+                                        "choiceJobQueueDisabled": {
+                                            "Type": "Choice",
+                                            "Choices": [
+                                                {
+                                                    "Variable": "$.JobQueueStatus.Value",
+                                                    "StringEquals": "VALID",
+                                                    "Next": "DeleteJobQueue"
+                                                },
+                                                {
+                                                    "Variable": "$.JobQueueStatus.Value",
+                                                    "StringEquals": "UPDATING",
+                                                    "Next": "waitTenSecondsJobQueue"
+                                                }
+                                            ]
+                                        },
+                                        "DeleteJobQueue": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::aws-sdk:batch:deleteJobQueue",
+                                            "Parameters": {
+                                                "JobQueue.$": "$.JobQueue.Arn"
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "DisableCompEnv",
+                                    "States":{
+                                    "DisableCompEnv": {
+                                        "Type": "Task",
+                                        "Resource": "arn:aws:states:::aws-sdk:batch:updateComputeEnvironment",
+                                        "Parameters": {
+                                            "ComputeEnvironment.$": "$.ComputeEnv.Arn",
+                                            "State": "DISABLED"
+                                        },
+                                        "ResultPath": null,
+                                        "Next": "waitTenSecondsComputeEnv"
+                                    },
+                                    "waitTenSecondsComputeEnv": {
+                                        "Type": "Wait",
+                                        "Seconds": 10,
+                                        "Next": "getComputeEnvState"
+                                    },
+                                    "getComputeEnvState": {
+                                        "Type": "Task",
+                                        "Resource": "arn:aws:states:::aws-sdk:batch:describeComputeEnvironments",
+                                        "Parameters": {
+                                            "ComputeEnvironments.$": "States.Array($.ComputeEnv.Arn)"
+                                        },
+                                        "ResultPath": "$.ComputeEnvironmentStatus",
+                                        "ResultSelector": {
+                                            "Value.$": "$.ComputeEnvironments[0].Status"
+                                        },
+                                        "Next": "choiceComputeEnvDisabled"
+                                    },
+                                    "choiceComputeEnvDisabled": {
+                                        "Type": "Choice",
+                                        "Choices": [
+                                            {
+                                                "Variable": "$.ComputeEnvironmentStatus.Value",
+                                                "StringEquals": "VALID",
+                                                "Next": "waitTenSecondsJobQueueForEnv"
+                                            },
+                                            {
+                                                "Variable": "$.ComputeEnvironmentStatus.Value",
+                                                "StringEquals": "UPDATING",
+                                                "Next": "waitTenSecondsComputeEnv"
+                                            }
+                                        ]
+                                    },
+                                    "waitTenSecondsJobQueueForEnv": {
+                                        "Type": "Wait",
+                                        "Seconds": 10,
+                                        "Next": "getJobQueueForEnv"
+                                    },
+                                    "getJobQueueForEnv": {
+                                        "Type": "Task",
+                                        "InputPath": "$",
+                                        "Resource": "arn:aws:states:::aws-sdk:batch:describeJobQueues",
+                                        "Parameters": {
+                                            "JobQueues.$": "States.Array($.JobQueue.Arn)"
+                                        },
+                                        "ResultPath": "$.JobQueues",
+                                        "ResultSelector": {
+                                            "Value.$": "$.JobQueues"
+                                        },
+                                        "Next": "checkJobQueuePresent"
+                                    },
+            
+                                    "checkJobQueuePresent": {
+                                        "Type": "Choice",
+                                        "Default": "DeleteComputeEnvironment",
+                                        "Choices": [
+                                            {
+                                                "And": [
+                                                    {
+                                                        "Variable": "$.JobQueues.Value",
+                                                        "IsPresent": true
+                                                    },
+                                                    {
+                                                        "Variable": "$.JobQueues.Value[0]",
+                                                        "IsPresent": true
+                                                    }
+                                                ],
+                                                "Next": "waitTenSecondsJobQueueForEnv"
+                                            }
+                                        ]
+                                    },
+                                    "DeleteComputeEnvironment": {
+                                        "Type": "Task",
+                                        "Resource": "arn:aws:states:::aws-sdk:batch:deleteComputeEnvironment",
+                                        "Parameters": {
+                                            "ComputeEnvironment.$": "$.ComputeEnv.Arn"
+                                        },
+                                        "End": true
+                                    }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "ResourceDeleteFail"
+                }
+            ],
+            "End": true
+        },
+        "ResourceDeleteFail": {
+            "Type": "Fail"
+        }
+    }
+}

@@ -1,0 +1,64 @@
+name: 'Terraform Apply'
+
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: environment
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VAR_project_name: ${{vars.PROJECT_NAME}}
+  TF_VAR_environment: ${{inputs.environment}}
+  TF_VAR_aws_region: ${{vars.AWS_REGION}}
+  TF_VAR_no_reply_email: ${{vars.NO_REPLY}}
+  TF_VAR_cf_domain: ${{vars.CF_DOMAIN}}
+  TF_VAR_gh_action_roles: ${{vars.CICD_ROLES}}
+  TF_VAR_github_org_name: ${{github.repository_owner}}
+  TF_VAR_github_repo_prefix: ${{vars.REPO_PREFIX}}
+  TF_VAR_low_cost_implementation: ${{vars.LOW_COST}}
+
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+    environment: ${{inputs.environment}}
+    defaults:
+      run:
+        working-directory:  devops/envs/${{inputs.environment}}/
+    steps:
+    # Checkout the repository to the GitHub Actions runner
+    - name: Checkout
+      uses: actions/checkout@v4
+    # Assuming the IAM role from AWS with admin rights
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::${{secrets.AWS_ACCOUNT_ID}}:role/${{vars.PROJECT_NAME}}-main-${{inputs.environment}}-my-github-actions-terraform
+        aws-region: ${{vars.AWS_REGION}}
+        mask-aws-account-id: true 
+    - name: Hashicorp Setup
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.9.5"
+    - name: Terraform Format
+      run: terraform fmt -check
+      continue-on-error: true
+    #Setting up the backend using github secrets
+    - name: Setting up terraform backend
+      uses: finddx/seq-treat-tbkb-github-actions/configure-terraform-backend@confterrav1
+      with:
+        aws_region: ${{vars.AWS_REGION}}
+        backend_bucket: ${{secrets.TF_VAR_BACKEND_BUCKET}}
+        backend_dynamo: "tf-backend-lock-${{vars.PROJECT_NAME}}-${{inputs.environment}}"
+        working-directory: devops/envs/${{inputs.environment}}/
+    #Doing terraform stuff
+    - name: Terraform Apply
+      run: |
+        terraform init -input=false
+        terraform apply -no-color -auto-approve

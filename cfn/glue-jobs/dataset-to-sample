@@ -1,0 +1,39 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "database_name", "postgres_db_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = "dataset_to_sample", transformation_ctx = "datasource0")
+
+datasource1 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_submission_sample")
+
+join2 = Join.apply(frame1 = datasource0, frame2 = datasource1, keys1 = "sampleid", keys2 = "id", transformation_ctx="join2")
+
+datasource3 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_dataset")
+
+join4 = Join.apply(frame1 = join2, frame2 = datasource3, keys1 = "datasetname", keys2 = "dataset_name", transformation_ctx="join2")
+
+applymapping1 = ApplyMapping.apply(frame = join4, mappings = [("dataset_id", "int", "dataset_id", "int"), ("id", "int", "sample_id", "int")], transformation_ctx = "applymapping1")
+
+selectfields2 = SelectFields.apply(frame = applymapping1, paths = ["sample_id", "dataset_id"], transformation_ctx = "selectfields2")
+
+filter3 = Filter.apply(frame = selectfields2, f = lambda x: x["sample_id"] is not None and x["dataset_id"] is not None, transformation_ctx = "filter3")
+
+resolvechoice3 = ResolveChoice.apply(frame = filter3, choice = "MATCH_CATALOG", database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_dataset_to_sample", transformation_ctx = "resolvechoice3")
+
+resolvechoice4 = ResolveChoice.apply(frame = resolvechoice3, choice = "make_cols", transformation_ctx = "resolvechoice4")
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = resolvechoice4, database = args["database_name"], table_name = f"{args['postgres_db_name']}_genphensql_dataset_to_sample", transformation_ctx = "datasink5")
+
+job.commit()

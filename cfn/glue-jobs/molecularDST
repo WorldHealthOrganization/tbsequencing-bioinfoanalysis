@@ -1,0 +1,39 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "database_name", "postgres_db_name"])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database =  args["database_name"], table_name = "moleculardst", transformation_ctx = "datasource0")
+
+datasource1 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_submission_sample")
+
+datasource2 = glueContext.create_dynamic_frame.from_catalog(database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_genphen_drug")
+
+join2 = Join.apply(frame1 = datasource0, frame2 = datasource1, keys1 = "sampleid", keys2 = "id", transformation_ctx="join2")
+
+join3 = Join.apply(frame1 = join2, frame2 = datasource2, keys1 = "drug", keys2 = "drug_name", transformation_ctx="join3")
+
+applymapping1 = ApplyMapping.apply(frame = datasource0, mappings = [("id", "int", "sample_id", "int"), ("drug_id", "int", "drug_id", "int"), ("moleculartestname", "string", "test_name", "string"), ("result", "string", "test_result", "string")], transformation_ctx = "applymapping1")
+
+selectfields2 = SelectFields.apply(frame = applymapping1, paths = ["test_name", "test_result", "drug_id", "sample_id"], transformation_ctx = "selectfields2")
+
+filter3 = Filter.apply(frame = selectfields2, f = lambda x: x["sample_id"] is not None and x["drug_id"] is not None, transformation_ctx = "filter3")
+
+resolvechoice3 = ResolveChoice.apply(frame = filter3, choice = "MATCH_CATALOG", database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_submission_mdrtest", transformation_ctx = "resolvechoice3")
+
+resolvechoice4 = ResolveChoice.apply(frame = resolvechoice3, choice = "make_cols", transformation_ctx = "resolvechoice4")
+
+datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = resolvechoice4, database = args["database_name"], table_name = f"{args['postgres_db_name']}_public_submission_mdrtest", transformation_ctx = "datasink5")
+
+job.commit()

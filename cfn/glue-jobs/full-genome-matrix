@@ -1,0 +1,233 @@
+import sys, boto3, os, io, pandas
+from itertools import chain
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from pyspark.sql import SQLContext
+from awsglue.dynamicframe import DynamicFrame
+from pyspark.sql.window import Window
+from pyspark.ml.feature import VectorAssembler, StandardScaler, PCA
+import pyspark.sql.functions as F
+from pyspark.sql.types import ArrayType, DoubleType
+
+
+args = getResolvedOptions(sys.argv, ['JOB_NAME', "glue_database_name", "rds_database_host", "rds_database_name", "rds_database_user", "rds_database_port"])
+
+glueContext = GlueContext(SparkContext.getOrCreate())
+
+spark = glueContext.spark_session
+
+job = Job(glueContext)
+
+rds_client = boto3.client('rds', region_name=os.environ["AWS_DEFAULT_REGION"])
+token = rds_client.generate_db_auth_token(DBHostname=args["rds_database_host"], Port=args["rds_database_port"], DBUsername=args["rds_database_user"])
+connection_url = 'jdbc:postgresql://'+args["rds_database_host"]+":"+args["rds_database_port"]+"/"+args["rds_database_name"]
+
+#We collect all variants needed for PCA of genotype background 
+#We exclude variants +/- 50bp of repetitive genes (PPE/PE) and genes implicated in drug resistance
+# selected_pos = spark.read.format("jdbc")\
+#     .option("url", connection_url)\
+#     .option("user", args["rds_database_user"])\
+#     .option("password", token)\
+#     .option("ssl", "true")\
+#     .option("query", """
+#         SELECT distinct "variant_id", "position", "reference_nucleotide", "alternative_nucleotide"
+#         FROM genphen_variant 
+#         WHERE reference_nucleotide IN ('A', 'C', 'G', 'T') AND alternative_nucleotide IN ('A', 'C', 'G', 'T')
+#         AND NOT "position" <@ (
+#             SELECT int4multirange('{' || string_agg('[' || (start_pos-50)::text || ',' || (end_pos+50)::text || ']', ',') || '}')
+#             FROM seqfeature seq 
+#             INNER JOIN seqfeature_dbxref sdb ON seq.seqfeature_id=sdb.seqfeature_id
+#             INNER JOIN seqfeature_qualifier_value sqv ON sqv."seqfeature_id"=seq.seqfeature_id
+#             INNER JOIN term ON (term.term_id=sqv.term_id AND term.name IN ('product', 'gene'))
+#             LEFT JOIN term t2 ON (t2.term_id=seq.type_term_id)
+#             INNER JOIN location ON location.seqfeature_id=seq.seqfeature_id
+#             LEFT JOIN gene_drug_resistance_association gdra ON gdra.gene_db_crossref_id = sdb.dbxref_id
+#             WHERE (
+#                 (sqv.value SIMILAR TO 'P?PE([_-]PGRS)?[0-9]+' AND t2.name='gene')
+#                 OR sqv.value SIMILAR TO '%transposas%'
+#                 OR sqv.value SIMILAR to '%PE-PGRS%'
+#                 OR drug_id IS NOT NULL
+#             )
+#         )
+#     """)\
+#     .load()\
+#     .alias("selected_pos")\
+#     .collect()
+
+#We collect all variants needed for PCA of genotype background 
+#We exclude variants +/- 50bp of repetitive genes (PPE/PE)
+selected_position = spark.read.format("jdbc")\
+    .option("url", connection_url)\
+    .option("user", args["rds_database_user"])\
+    .option("password", token)\
+    .option("ssl", "true")\
+    .option("query", """
+        SELECT distinct "variant_id", "position", "reference_nucleotide", "alternative_nucleotide"
+        FROM genphen_variant 
+        WHERE reference_nucleotide IN ('A', 'C', 'G', 'T') AND alternative_nucleotide IN ('A', 'C', 'G', 'T')
+        AND NOT "position" <@ (
+            SELECT int4multirange('{' || string_agg('[' || (start_pos-50)::text || ',' || (end_pos+50)::text || ']', ',') || '}')
+            FROM seqfeature seq 
+            INNER JOIN seqfeature_dbxref sdb ON seq.seqfeature_id=sdb.seqfeature_id
+            INNER JOIN seqfeature_qualifier_value sqv ON sqv."seqfeature_id"=seq.seqfeature_id
+            INNER JOIN term ON (term.term_id=sqv.term_id AND term.name IN ('product', 'gene'))
+            LEFT JOIN term t2 ON (t2.term_id=seq.type_term_id)
+            INNER JOIN location ON location.seqfeature_id=seq.seqfeature_id
+            WHERE (
+                (sqv.value SIMILAR TO 'P?PE([_-]PGRS)?[0-9]+' AND t2.name='gene')
+                OR sqv.value SIMILAR TO '%transposas%'
+                OR sqv.value SIMILAR to '%PE-PGRS%'
+            )
+        )
+    """)\
+    .load()\
+    .alias("selected_position")\
+    .collect()
+
+selected_position = spark.createDataFrame(selected_position)
+
+sample = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_genphensql_sample").alias("sample")
+
+summary_stats = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_submission_summarysequencingstats")
+
+seq_data = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_genphensql_sequencing_data")
+
+#Filtered samples based on general QC values
+filtered_samples = sample.join(summary_stats,
+        sample.sample_id==summary_stats.sample_id,
+        how="inner")\
+    .join(seq_data,
+        seq_data.sample_id==sample.sample_id,
+        how="inner")\
+    .where((F.col("sequencing_platform")=="ILLUMINA")
+        & (F.col("library_preparation_strategy")=="WGS")
+        & (F.col("median_depth")>15)
+        & (F.col("coverage_20x")>0.95))\
+    .select(sample.sample_id)\
+    .distinct()\
+    .alias("filtered_samples")
+
+genotype = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_submission_genotype").alias("genotype")
+
+variant = glueContext.create_data_frame.from_catalog(database = args["glue_database_name"], table_name = "postgres_public_genphen_variant")\
+    .where(
+        F.col("reference_nucleotide").isin(["A", "C", "G", "T"])
+        & F.col("alternative_nucleotide").isin(["A", "C", "G", "T"]))\
+    .withColumn("reference_int",
+        F.when(F.col("reference_nucleotide")=="A", 1)\
+        .when(F.col("reference_nucleotide")=="C", 2)\
+        .when(F.col("reference_nucleotide")=="G", 3)\
+        .when(F.col("reference_nucleotide")=="T", 4))\
+    .withColumn("alternative_int",
+        F.when(F.col("alternative_nucleotide")=="A", 1)\
+        .when(F.col("alternative_nucleotide")=="C", 2)\
+        .when(F.col("alternative_nucleotide")=="G", 3)\
+        .when(F.col("alternative_nucleotide")=="T", 4))
+
+varying_position = selected_position.join(genotype,
+        (genotype.variant_id==selected_position.variant_id) & (genotype.genotyper=="bcftools"),
+        how="inner")\
+    .join(filtered_samples,
+        filtered_samples.sample_id==genotype.sample_id,
+        how="inner")\
+    .where((F.col("genotype.alternative_ad").cast("double")/F.col("genotype.total_dp").cast("double"))>0.75)\
+    .groupBy(selected_position.position)\
+    .agg(F.countDistinct("filtered_samples.sample_id").alias("genotype_count"))\
+    .withColumn("freq", 
+        F.col("genotype_count").cast("float")/float(filtered_samples.count()))\
+    .where((F.col("freq")>0.01)
+         & (F.col("freq")<0.99)
+         & F.col("freq").isNotNull())\
+    .select(F.col("position"))\
+    .alias("varying_position")\
+
+varying_variant = varying_position.join(variant,
+        variant.position==varying_position.position,
+        how="inner")\
+    .select(
+        F.col("variant_id"),
+        F.col("varying_position.position"),
+        F.col("reference_int"),
+        F.col("alternative_int"))\
+    .distinct()\
+    .alias("varying_variant")
+
+variant_x_genotype = filtered_samples.crossJoin(varying_variant)\
+    .join(genotype,
+        (genotype.variant_id==varying_variant.variant_id) & (genotype.sample_id==filtered_samples.sample_id) & (genotype.genotyper=="bcftools"),
+        how="left")\
+    .withColumn("dp",
+        F.col("genotype.alternative_ad").cast("double")/F.col("genotype.total_dp").cast("double"))\
+    .withColumn("row_number",
+        F.row_number().over(
+            Window.partitionBy(F.col("varying_variant.position"), F.col("filtered_samples.sample_id"))\
+            .orderBy( F.col("dp").desc_nulls_last()))
+        )\
+    .where(F.col("row_number")==1)\
+    .withColumn("integer",
+        F.when(F.col("dp").isNotNull() & (F.col("dp")>0.75), F.col("alternative_int"))\
+        .otherwise(F.col("reference_int"))
+        )\
+    .withColumn("binary_status",
+        F.when(F.col("dp").isNotNull() & (F.col("dp")>0.75), F.col("alternative_int"))\
+        .otherwise(F.col("reference_int"))
+        )\
+    .select(F.col("filtered_samples.sample_id"),
+        F.col("varying_variant.position"),
+        F.col("integer"))
+
+genotype_matrix = variant_x_genotype.groupBy(F.col("filtered_samples.sample_id"))\
+    .pivot("varying_variant.position",
+        values=[x["position"] for x in varying_position.select("position").distinct().collect()])\
+    .agg({"integer": "first"})
+
+reference_dict = {
+    str(x["position"]): int(x["reference_int"]) for x in varying_variant\
+        .select("position", "reference_int")\
+        .distinct()\
+        .collect()
+    }
+
+genotype_string = genotype_matrix.fillna(
+    value=reference_dict
+    )
+
+#Center the matrix before running the PCA
+vecAssembler = VectorAssembler(outputCol="features", inputCols=[x for x in genotype_string.schema.names if x!="sample_id"])
+
+vecData = vecAssembler.transform(genotype_string).select("sample_id", "features")
+
+standScaler = StandardScaler(inputCol="features", outputCol="scaledFeatures", withStd=False, withMean=True)
+
+scaledData = standScaler.fit(vecData).transform(vecData).select("sample_id", "scaledFeatures")
+
+dimension_number = 10
+
+pca = PCA(k=dimension_number, inputCol = "scaledFeatures", outputCol="pcaFeatures")
+
+transformed_feature = pca.fit(scaledData).transform(scaledData).select("sample_id", "pcaFeatures")
+
+def split_array_to_list(col):
+    def to_list(v):
+        return v.toArray().tolist()
+    return F.udf(to_list, ArrayType(DoubleType()))(col)
+
+final_df = transformed_feature\
+    .select("sample_id", split_array_to_list(F.col("pcaFeatures")).alias("split_float"))\
+    .select(["sample_id"] + [F.col("split_float")[i] for i in range(dimension_number)])
+
+# Script generated for node S3 bucket
+S3bucket_node3 = glueContext.write_dynamic_frame.from_options(
+    frame=DynamicFrame.fromDF(final_df,
+        glueContext,
+        "final"),
+    connection_type="s3",
+    format="csv",
+    connection_options={
+        "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["JOB_RUN_ID"]+"/pca/",
+        "partitionKeys": [],
+    }
+)

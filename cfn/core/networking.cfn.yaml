@@ -1,0 +1,385 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Defines AWS networking resources for secondary analysis pipelines
+
+Parameters:
+  Project:
+    Description: Prefix used for naming resources
+    Type: String
+    Default: GenomicsWorkflow
+  ProjectLowerCase:
+    Description: Lowercase prefix used in resources
+    Type: String
+    Default: genomicsworkflow
+  
+  ZoneStackName:
+    Description: Cloudformation StackName for project zone
+    Type: String
+
+Mappings:
+  solution:
+    metadata:
+      id: SO0076
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # this public subnet is only needed for the NAT Gateway
+  SubnetPublic1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 0, !Cidr [ !GetAtt VPC.CidrBlock, 3, 13]]
+      #MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Public-1
+        - Key: access
+          Value: public
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: MapPublicIpOnLaunch needed for AWS Batch.
+
+  SubnetPublic2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 7, !Cidr [ !GetAtt VPC.CidrBlock, 8, 13]]
+      #MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Public-2
+        - Key: access
+          Value: public
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: MapPublicIpOnLaunch needed for AWS Batch.
+
+  SubnetPrivate1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 1, !Cidr [ !GetAtt VPC.CidrBlock, 3, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-1
+        - Key: access
+          Value: private
+
+  SubnetPrivate2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 2, !Cidr [ !GetAtt VPC.CidrBlock, 3, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-2
+        - Key: access
+          Value: private
+
+  SubnetPrivate3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 3, !Cidr [ !GetAtt VPC.CidrBlock, 4, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 2
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-3
+        - Key: access
+          Value: private
+
+  SubnetPrivate4:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 4, !Cidr [ !GetAtt VPC.CidrBlock, 5, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 3
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-4
+        - Key: access
+          Value: private
+
+  SubnetPrivate5:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 5, !Cidr [ !GetAtt VPC.CidrBlock, 6, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 4
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-5
+        - Key: access
+          Value: private
+
+  SubnetPrivate6:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 6, !Cidr [ !GetAtt VPC.CidrBlock, 7, 13]]
+      AvailabilityZone:
+        Fn::Select:
+          - 5
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private-6
+        - Key: access
+          Value: private
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Public
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-Private
+  
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetPublic1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref SubnetPublic1
+
+  SubnetPublic2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref SubnetPublic2
+
+  SubnetPrivate1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate1
+
+  SubnetPrivate2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate2
+
+  SubnetPrivate3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate3
+
+  SubnetPrivate4RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate4
+
+  SubnetPrivate5RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate5
+
+  SubnetPrivate6RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetPrivate6
+
+  # Use a VPC Gateway Endpoint for S3 so that requests for data do not route over the public internet
+  S3VpcEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3 #required
+      VpcId: !Ref VPC #required
+
+  SecurityGroupBatch:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for AWS Batch Launched Instances.
+      VpcId: 
+        Ref: VPC
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic for updates.
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W40
+            reason: Allow all outbound traffic for updates.
+          - id: W5
+            reason: Allow all outbound traffic for updates.
+          - id: W42
+            reason: Allow self-ingress on all ports for inter-node communication
+
+  SecurityGroupHost:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for AWS EC2 instance.
+      VpcId:
+        Ref: VPC
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic for updates.
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - Description: Allow SSH
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          
+  SecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for AWS RDS.
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - Description: Allow PostgreSQL connection inside Security Group
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref SecurityGroupHost
+        - Description: Allow PostgreSQL from Batch Security Group
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref SecurityGroupBatch
+
+  SelfIngressSecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      Description: Self ingress rule needed for the Glue Connection
+      FromPort: 0
+      ToPort: 65535
+      GroupId: !Ref SecurityGroupRDS
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref SecurityGroupRDS
+
+  
+  # this ingress rule is needed if you have tightly coupled multi-node workloads
+  # or if you are using a parallel filesystem
+  SecurityGroupSelfIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      Description: Allow instances in the same security group to communicate
+      IpProtocol: "-1" #required
+      GroupId: !Ref SecurityGroupBatch
+      SourceSecurityGroupId: !Ref SecurityGroupBatch
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W42
+            reason: Allow self-ingress on all ports for inter-node communication
+
+  # this rule to allow access to the ECR Private Links in the Batch security Group
+  SecurityGroupBatchECRPrivateLink:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      Description: Allow instances in the Host security group access to the ECR PrivateLink port
+      IpProtocol: tcp #required
+      FromPort: 443
+      ToPort: 443
+      GroupId: !Ref SecurityGroupBatch
+      SourceSecurityGroupId: !Ref SecurityGroupBatch
+
+  SecurityGroupBatchECRPrivateLink2:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      Description: Allow instances in the Batch security group access to the ECR PrivateLink port
+      IpProtocol: tcp #required
+      FromPort: 443
+      ToPort: 443
+      GroupId: !Ref SecurityGroupBatch
+      SourceSecurityGroupId: !Ref SecurityGroupBatch
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  PublicSubnetId:
+    Value: !Ref SubnetPublic1
+  SecurityGroupBatchId:
+    Value: !Ref SecurityGroupBatch
+  SecurityGroupRDSId:
+    Value: !Ref SecurityGroupRDS
+  PrivateSubnet3Id:
+    Value: !Ref SubnetPrivate3
+  PrivateSubnet2Id:
+    Value: !Ref SubnetPrivate2
+  PrivateSubnet1Id:
+    Value: !Ref SubnetPrivate1
+  PrivateRouteTableId:
+    Value: !Ref PrivateRouteTable
+...
