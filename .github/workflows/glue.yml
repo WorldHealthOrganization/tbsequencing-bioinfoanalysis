@@ -16,6 +16,7 @@ jobs:
     with:
       environment: ${{inputs.environment}}
       role_name: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'copy-glue'}}
+      identifier: ${{startsWith(inputs.environment, 'prod') && 'main' || 'bio'}}
     secrets:
       AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
   
