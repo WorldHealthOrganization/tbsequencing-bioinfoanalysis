@@ -1,0 +1,195 @@
+{
+    "Comment": "Refresh statistics materialized views.",
+    "StartAt": "ConcurrencyProtectionGetStatus",
+    "States": {
+        "ConcurrencyProtectionGetStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sfn:listExecutions",
+            "Parameters": {
+                "StateMachineArn.$": "$$.StateMachine.Id",
+                "StatusFilter": "RUNNING"
+            },
+            "Next": "ConcurrencyProtectionCheck",
+            "ResultSelector": {
+                "Count.$": "States.ArrayLength($.Executions)",
+                "Items.$": "$.Executions"
+            },
+            "ResultPath": "$.ConcurrencyProtectionRuns"
+        },
+        "ConcurrencyProtectionCheck": {
+            "Type": "Choice",
+            "Choices": [{
+                "Variable": "$.ConcurrencyProtectionRuns.Count",
+                "NumericGreaterThan": 1,
+                "Next": "ConcurrencyProtectionTriggered"
+            }],
+            "Default": "RefreshOverviewGene"
+        },
+        "ConcurrencyProtectionTriggered": {
+            "Type": "Fail",
+            "Error": "ConcurrencyProtectionTriggered",
+            "Cause": "Another instance is running in parallel, skipping this one"
+        },
+        "RefreshOverviewGene": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "REFRESH MATERIALIZED VIEW public.overview_gene;"
+                }
+            },
+            "Next": "RefreshOverviewSampleDrugResult"
+        },
+        "RefreshOverviewSampleDrugResult": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "REFRESH MATERIALIZED VIEW public.overview_sampledrugresult;"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "RefreshOverviewGeneDrugStats"
+        },
+        "RefreshOverviewGeneDrugStats": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "REFRESH MATERIALIZED VIEW CONCURRENTLY public.overview_genedrugstats;"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "Next": "RefreshOverviewSampleDrugResultStats"
+        },
+        "RefreshOverviewSampleDrugResultStats": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobDefinition": "${BioPythonFargate}",
+                "JobName": "normalizeInsertAnnotation",
+                "JobQueue": "${FargateQueueArn}",
+                "ContainerOverrides": {
+                    "Environment": [
+                        {
+                            "Name": "RDS_QUERY",
+                            "Value": "REFRESH MATERIALIZED VIEW public.overview_sampledrugresultstats;"
+                        }
+                    ],
+                    "ResourceRequirements": [
+                        {
+                            "Type": "VCPU",
+                            "Value": "0.25"
+                        },
+                        {
+                            "Type": "MEMORY",
+                            "Value": "512"
+                        }
+                    ],
+                    "Command": [
+                        "/scripts/query_rds.py",
+                        "--db_host",
+                        "Ref::ENDPOINT",
+                        "--db_name",
+                        "Ref::NAME",
+                        "--db_user",
+                        "Ref::USER",
+                        "--db_port",
+                        "Ref::PORT",
+                        "--aws_region",
+                        "Ref::REGION"
+                    ]
+                },
+                "Parameters": {
+                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                    "NAME.$": "$.DbConnection.Name",
+                    "USER.$": "$.DbConnection.User",
+                    "PORT.$": "$.DbConnection.Port",
+                    "REGION.$": "$.DbConnection.Region"
+                }
+            },
+            "End": true
+        }
+    }
+}
