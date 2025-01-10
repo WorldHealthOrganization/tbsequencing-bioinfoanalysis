@@ -434,6 +434,7 @@ module "pipeline_variant_annotation" {
       SecurityGroupId        = data.aws_security_group.batch-compute.id
       SubnetId1              = var.low_cost_implementation ? data.aws_subnets.public-a[0].ids[0] : data.aws_subnets.private-a[0].ids[0]
       SubnetId2              = var.low_cost_implementation ? data.aws_subnets.public-b[0].ids[0] : data.aws_subnets.private-b[0].ids[0]
+      PublicIp               = var.low_cost_implementation ? "ENABLED" : "DISABLED"
 
       Prefix    = local.prefix
       AccountId = local.account_id

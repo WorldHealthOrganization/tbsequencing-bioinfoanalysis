@@ -233,6 +233,9 @@
                                     "Image": "${AccountId}.dkr.ecr.${Region}.amazonaws.com/${Project}-genomicsworkflow-snpeff:latest",
                                     "ExecutionRoleArn": "${InstanceProfileRoleArn}",
                                     "JobRoleArn": "${JobRoleArn}",
+                                    "NetworkConfiguration": {
+                                        "AssignPublicIp":"${PublicIp}"
+                                    },
                                     "Volumes": [
                                         {
                                             "Name": "efs",
@@ -338,6 +341,9 @@
                                     "Image": "${AccountId}.dkr.ecr.${Region}.amazonaws.com/${Project}-genomicsworkflow-biopython:latest",
                                     "ExecutionRoleArn": "${InstanceProfileRoleArn}",
                                     "JobRoleArn": "${JobRoleArn}",
+                                    "NetworkConfiguration": {
+                                        "AssignPublicIp":"${PublicIp}"
+                                    },
                                     "Volumes": [
                                         {
                                             "Name": "efs",
