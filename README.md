@@ -1,3 +1,6 @@
+# WHO Owner
+Owned by the Global Tuberculosis Programme, GTB, Geneva Switzerland. References: Carl-Michael Nathanson.
+
 # Bioinformatic processing
 
 The repository holds definition for three different components of the bioinformatic processing:
