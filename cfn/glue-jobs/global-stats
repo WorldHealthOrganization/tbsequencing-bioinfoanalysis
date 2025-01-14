@@ -38,7 +38,6 @@ sample = (
     )
 )
 
-print(sample)
 
 datasource0 = (
     glueContext.create_dynamic_frame.from_catalog(
@@ -46,18 +45,17 @@ datasource0 = (
         table_name = "global_stats",
         transformation_ctx = "datasource0"
     )
+    .join(
+        ["sampleid"],
+        ["id"],
+        sample
+    )
 )
 
-print(datasource0)
 
 applymapping1 = (
     ApplyMapping.apply(
         frame = datasource0, mappings = [("sampleid", "long", "sample_id", "int"), ("mediandepth", "double", "median_depth", "double"), ("coverage10x", "double", "coverage_10x", "double"), ("coverage15x", "double", "coverage_15x", "double"), ("coverage20x", "double", "coverage_20x", "double"), ("coverage30x", "double", "coverage_30x", "double"), ("rawtotalsequences", "long", "raw_total_sequences", "long"), ("filteredsequences", "long", "filtered_sequences", "long"), ("sequences", "long", "sequences", "long"), ("issorted", "long", "is_sorted", "long"), ("firstfragments", "long", "first_fragments", "long"), ("lastfragments", "long", "last_fragments", "long"), ("readsmapped", "long", "reads_mapped", "long"), ("readsmappedandpaired", "long", "reads_mapped_and_paired", "long"), ("readsunmapped", "long", "reads_unmapped", "long"), ("readsproperlypaired", "long", "reads_properly_paired", "long"), ("readspaired", "long", "reads_paired", "long"), ("readsduplicated", "long", "reads_duplicated", "long"), ("readsmq0", "long", "reads_mq_0", "long"), ("readsqcfailed", "long", "reads_qc_failed", "long"), ("nonprimaryalignments", "long", "non_primary_alignments", "long"), ("totallength", "long", "total_length", "long"), ("totalfirstfragmentlength", "long", "total_first_fragment_length", "long"), ("totallastfragmentlength", "long", "total_last_fragment_length", "long"), ("basesmapped", "long", "bases_mapped", "long"), ("basesmappedcigar", "long", "bases_mapped_cigar", "long"), ("basestrimmed", "long", "bases_trimmed", "long"), ("basesduplicated", "long", "bases_duplicated", "long"), ("mismatches", "long", "mismatches", "long"), ("errorrate", "double", "error_rate", "double"), ("averagelength", "long", "average_length", "int"), ("averagefirstfragmentlength", "long", "average_first_fragment_length", "int"), ("averagelastfragmentlength", "long", "average_last_fragment_length", "int"), ("maximumlength", "long", "maximum_length", "int"), ("maximumfirstfragmentlength", "long", "maximum_first_fragment_length", "int"), ("maximumlastfragmentlength", "long", "maximum_last_fragment_length", "int"), ("averagequality", "double", "average_quality", "double"), ("insertsizeaverage", "double", "insert_size_average", "double"), ("insertsizestandarddeviation", "double", "insert_size_standard_deviation", "double"), ("inwardorientedpairs", "long", "inward_oriented_pairs", "int"), ("outwardorientedpairs", "long", "outward_oriented_pairs", "int"), ("pairswithotherorientation", "long", "pairs_with_other_orientation", "int"), ("pairsondifferentchromosomes", "long", "pairs_on_different_chromosomes", "int"), ("percentageofproperlypairedreads", "double", "percentage_of_properly_paired_reads", "double")], transformation_ctx = "applymapping1"
-    )
-    .join(
-        ["sample_id"],
-        ["id"],
-        sample
     )
 )
 
