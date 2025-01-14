@@ -26,7 +26,33 @@ spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
 
-datasource0 = glueContext.create_dynamic_frame.from_catalog(database = args["glue_db_name"], table_name = "deletion", transformation_ctx = "datasource0")
+# Adding extra safeguard
+# Filter sample ids that have been correctly processed
+# bioanalysis_status = 'Uploaded to S3'
+
+sample = (
+    glueContext.create_dynamic_frame.from_catalog(
+        database=glue_dbname,
+        table_name=dbname + "_public_submission_sample"
+    )
+    .filter(
+        f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
+    )
+)
+
+datasource0 = (
+    glueContext.create_dynamic_frame.from_catalog(
+        database = args["glue_db_name"],
+        table_name = "deletion",
+        transformation_ctx = "datasource0"
+    )
+    .join(
+        ["sampleid"],
+        ["id"],
+        sample
+    )
+)
+
 
 total = Map.apply(frame = datasource0, f = AddRefAltAD)
 

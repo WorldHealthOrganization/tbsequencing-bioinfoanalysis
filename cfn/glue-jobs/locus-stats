@@ -17,9 +17,42 @@ spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
 
-datasource0 = glueContext.create_dynamic_frame.from_catalog(database = args["glue_db_name"], table_name = "locus_stats", transformation_ctx = "datasource0")
 
-datasource1 = glueContext.create_dynamic_frame.from_catalog(database = args["glue_db_name"], table_name = f"{args['postgres_db_name']}_public_genphen_locustag")
+dbname = args["postgres_db_name"]
+glue_dbname = args["glue_db_name"]
+
+# Adding extra safeguard
+# Filter sample ids that have been correctly processed
+# bioanalysis_status = 'Uploaded to S3'
+
+sample = (
+    glueContext.create_dynamic_frame.from_catalog(
+        database=glue_dbname,
+        table_name=dbname + "_public_submission_sample"
+    )
+    .filter(
+        f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
+    )
+)
+
+datasource0 = (
+    glueContext.create_dynamic_frame.from_catalog(
+        database = args["glue_db_name"], 
+        table_name = "locus_stats",
+        transformation_ctx = "datasource0"
+    )
+    .join(
+        ["sampleid"],
+        ["id"],
+        sample
+    )
+)
+
+datasource1 = glueContext.create_dynamic_frame.from_catalog(
+    database = args["glue_db_name"],
+    table_name = f"{args['postgres_db_name']}_public_genphen_locustag"
+)
+
 
 join1 = Join.apply(frame1 = datasource0, frame2 = datasource1, keys1 = "locustagname", keys2 = "locus_tag_name", transformation_ctx="join3")
 
