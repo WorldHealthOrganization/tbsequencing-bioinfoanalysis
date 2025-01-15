@@ -26,6 +26,9 @@ spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
 
+dbname = args["postgres_db_name"]
+glue_dbname = args["glue_db_name"]
+
 # Adding extra safeguard
 # Filter sample ids that have been correctly processed
 # bioanalysis_status = 'Uploaded to S3'
