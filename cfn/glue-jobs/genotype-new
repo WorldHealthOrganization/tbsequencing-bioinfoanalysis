@@ -48,7 +48,6 @@ datasource0 = (
         sample
     )
 )
-
 applymapping1 = ApplyMapping.apply(
     frame = datasource0,
     mappings = [

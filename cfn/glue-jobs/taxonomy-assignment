@@ -49,7 +49,6 @@ datasource0 = (
         ["id"],
         sample
     )
-
 )
 
 applymapping1 = (
