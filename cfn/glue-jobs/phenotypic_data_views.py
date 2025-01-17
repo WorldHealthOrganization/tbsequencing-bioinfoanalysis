@@ -706,7 +706,7 @@ if __name__ == "__main__":
 
     args = getResolvedOptions(
         sys.argv,
-        ['JOB_NAME', "glue_db_name", "postgres_db_name", "log-s3-bucket"]
+        ['JOB_NAME', "glue_db_name", "postgres_db_name", "log_s3_bucket"]
     )
 
     spark_Cont = SparkContext.getOrCreate()
@@ -939,4 +939,4 @@ if __name__ == "__main__":
     writer.save()
     data = output.getvalue()
     
-    s3.Bucket(args["log-s3-bucket"]).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)    
+    s3.Bucket(args["log_s3_bucket"].strip("s3://").strip("/")).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)    
