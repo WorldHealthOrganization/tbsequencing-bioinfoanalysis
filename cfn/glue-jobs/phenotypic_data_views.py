@@ -706,7 +706,7 @@ if __name__ == "__main__":
 
     args = getResolvedOptions(
         sys.argv,
-        ['JOB_NAME', "glue_db_name", "postgres_db_name"]
+        ['JOB_NAME', "glue_db_name", "postgres_db_name", "log-s3-bucket"]
     )
 
     spark_Cont = SparkContext.getOrCreate()
@@ -729,7 +729,7 @@ if __name__ == "__main__":
     
     phenotypes_category = glueContext.create_data_frame.from_catalog(
         database = glue_dbname,
-        table_name = dbname + "_genphensql_phenotypic_drug_susceptiblity_test_who_category"
+        table_name = dbname + "_public_genphen_pdstestcategory"
     )
 
     drug = glueContext.create_data_frame.from_catalog(
@@ -795,11 +795,19 @@ if __name__ == "__main__":
         )
     )
 
-    mic = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname + "_public_submission_mictest"
-    ).alias("mic")
+    mic = (
+        glueContext.create_data_frame.from_catalog(
+            database = glue_dbname,
+            table_name = dbname + "_public_submission_mictest"
+        )
+        .alias("mic")
+        .withColumnRenamed(
+            "range",
+            "mic_value"
+        )
+    )
 
+    
     ecoff = glueContext.create_data_frame.from_catalog(
         database = glue_dbname,
         table_name = dbname + "_public_genphen_epidemcutoffvalue"
@@ -931,4 +939,4 @@ if __name__ == "__main__":
     writer.save()
     data = output.getvalue()
     
-    s3.Bucket('aws-glue-assets-231447170434-us-east-1').put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)
+    s3.Bucket(args["log-s3-bucket"]).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)    
