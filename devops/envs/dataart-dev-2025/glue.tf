@@ -417,7 +417,29 @@ locals {
       }
       script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/phenotypic_data_views.py"
     }
+    variant_category = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job for predicting resistance according to mutation catalogue v2"
+      glue_version      = "4.0"
+      number_of_workers = "3"
+      worker_type       = "G.2X"
 
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option" = "job-bookmark-disable",
+        "--glue_db_name"        = module.glue.glue_database_name["glue_database"],
+        "--postgres_db_name"    = data.aws_ssm_parameter.db_name.value,
+        "--sample_fraction"     = 1,
+        "--unpool_frameshifts"  = 1,
+        "--extra-py-files"      = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/ETL_tools.zip",
+        "--TempDir"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+      }
+      script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/variant_annotation_categorization.py"
+    }
     join_genotype = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
@@ -490,7 +512,6 @@ locals {
       }
       script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/predict_resistance_v2.py"
     }
-
     write_formatted_annotations_per_gene = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
