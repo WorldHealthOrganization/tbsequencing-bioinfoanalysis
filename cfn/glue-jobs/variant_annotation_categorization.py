@@ -584,7 +584,7 @@ def tiered_drug_variant_categories(
             other=promoter_distance.alias("prom_dist"),
             on=(F.col("prom_dist.gene_db_crossref_id")==F.col("fapg1.gene_db_crossref_id"))
                 & (F.col("curated_effect")=="upstream_gene_variant")
-                & F.col("distance_to_reference").between(F.col("prom_dist.region_start"), F.col("prom_dist.region_end")),
+                & F.col("distance_to_reference").between(F.col("prom_dist.start"), F.col("prom_dist.end")),
             how="left",
         )
         # Exclude all upstream gene variant that are not located inside promoter regions for each gene
@@ -685,7 +685,7 @@ if __name__=="__main__":
 
     d = datetime.datetime.now().isoformat()
 
-    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "sample_fraction", "unpool_frameshifts"])
+    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "sample_fraction", "unpool_frameshifts", "log_s3_bucket"])
 
     dbname = args["postgres_db_name"]
     glue_dbname = args["glue_db_name"]
@@ -697,6 +697,8 @@ if __name__=="__main__":
     spark._jsc.hadoopConfiguration().set('spark.sql.broadcastTimeout', '3600')
 
     job = Job(glueContext)
+
+    bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
 
     dbxref = glueContext.create_data_frame.from_catalog(
         database = glue_dbname,
@@ -892,7 +894,7 @@ if __name__=="__main__":
 
     csv_buffer = io.BytesIO()
     variant_mapping.to_csv(csv_buffer, index=False)
-    s3.Object("aws-glue-assets-231447170434-us-east-1", args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
+    s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
 
 
     # fill_new_table = (
