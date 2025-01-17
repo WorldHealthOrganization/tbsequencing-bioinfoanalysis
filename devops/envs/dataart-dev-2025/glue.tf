@@ -394,6 +394,30 @@ locals {
       }
       script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/del-variants"
     }
+    phenotype_classification = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job to insert new delly deletion variants"
+      glue_version      = "3.0"
+      number_of_workers = "2"
+      worker_type       = "G.2X"
+
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option"       = "job-bookmark-disable",
+        "--conf"                      = "spark.driver.maxResultSize=6g",
+        "--glue_db_name"              = module.glue.glue_database_name["glue_database"],
+        "--log-s3-bucket"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--postgres_db_name"          = data.aws_ssm_parameter.db_name.value,
+        "--TempDir"                   = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--additional-python-modules" = "openpyxl==3.0.10"
+      }
+      script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/phenotypic_data_views.py"
+    }
+
     join_genotype = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
