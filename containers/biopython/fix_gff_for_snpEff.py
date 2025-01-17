@@ -74,7 +74,11 @@ def main(arguments):
     # Actually not doing that for the moment
     #    if arguments.genome_accession_id=="GCF_000195955.2" and arguments.assembly_accession_id=="ASM19595v2":
     #        db.execute("UPDATE features SET end=replace(end, 1254534, 1254510)")
-    
+
+    # Correcting the start of gene alr following Claudio instructions
+    if arguments.genome_accession_id=="GCF_000195955.2" and arguments.assembly_accession_id=="ASM19595v2":
+            db.execute("UPDATE features SET end=replace(end, 3841420, 3841348)")
+
     with open("genes.gff", "w") as fixed_file:
         for f in db.all_features():
             fixed_file.write(str(f) + '\n')
