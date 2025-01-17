@@ -939,4 +939,6 @@ if __name__ == "__main__":
     writer.save()
     data = output.getvalue()
     
-    s3.Bucket(args["log_s3_bucket"].strip("s3://").strip("/")).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)    
+    bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
+
+    s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)
