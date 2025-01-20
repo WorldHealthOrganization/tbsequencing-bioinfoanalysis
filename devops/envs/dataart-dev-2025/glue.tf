@@ -407,13 +407,12 @@ locals {
       })
 
       default_arguments = {
-        "--job-bookmark-option"       = "job-bookmark-disable",
-        "--conf"                      = "spark.driver.maxResultSize=6g",
-        "--glue_db_name"              = module.glue.glue_database_name["glue_database"],
-        "--log_s3_bucket"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
-        "--postgres_db_name"          = data.aws_ssm_parameter.db_name.value,
-        "--TempDir"                   = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
-        "--additional-python-modules" = "openpyxl==3.0.10"
+        "--job-bookmark-option" = "job-bookmark-disable",
+        "--conf"                = "spark.driver.maxResultSize=6g",
+        "--glue_db_name"        = module.glue.glue_database_name["glue_database"],
+        "--log_s3_bucket"       = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--postgres_db_name"    = data.aws_ssm_parameter.db_name.value,
+        "--TempDir"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
       }
       script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/phenotypic_data_views.py"
     }
