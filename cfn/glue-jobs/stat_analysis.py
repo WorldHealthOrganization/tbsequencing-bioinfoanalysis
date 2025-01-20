@@ -231,7 +231,7 @@ from variant_annotation_categorization import *
 #         }
 #     )
 
-def twalker_extraction(genotype_categorized, position, filtered_sample_drug, loc_seq_stats, drug, gene_locus_tag, tier, orphan=False):
+def twalker_extraction(genotype_categorized, position, filtered_sample_drug, loc_seq_stats, drug, gene_locus_tag, tier, bucket, orphan=False):
 
     final_results = (
         filtered_sample_drug.alias("filtered_samples")
@@ -336,7 +336,7 @@ def twalker_extraction(genotype_categorized, position, filtered_sample_drug, loc
             connection_type="s3",
             format="csv",
             connection_options={
-                "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("/").strip("")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/missing_sample_drug_tier/",
+                "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/missing_sample_drug_tier/",
                 "partitionKeys": ["drug_name", "tier"]
             }
         )
@@ -416,7 +416,7 @@ def twalker_extraction(genotype_categorized, position, filtered_sample_drug, loc
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("/").strip("")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/"+output_folder+"/",
+            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/"+output_folder+"/",
             "partitionKeys": partition
         }
     )
@@ -496,6 +496,25 @@ if __name__=="__main__":
                     )
         else: 
             raise ValueError
+
+    data_frame["mictest"] = (
+        data_frame["mictest"]
+        .alias("mic")
+        .withColumnRenamed(
+            "range",
+            "mic_value"
+        )
+    )
+
+    data_frame["sample"] = (
+        data_frame["sample"]
+        .alias("sample")
+        .withColumnRenamed(
+            "id",
+            "sample_id"
+        )
+    )
+
 
     # cryptic_qual = (
     #     glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "cryptic_low_quality")
@@ -658,7 +677,7 @@ if __name__=="__main__":
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/phenotypes/",
+            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/phenotypes/",
             "partitionKeys": ["drug_name"],
         }
     )
@@ -944,6 +963,8 @@ if __name__=="__main__":
     )
 
 
+    protein_id = protein_id_view(data_frame["dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature_dbxref"]).alias("protein_id")
+
     fapg = formatted_annotation_per_gene(data_frame["varianttoannotation"], data_frame["annotation"], data_frame["dbxref"], protein_id).alias("fapg")
 
     mvd = multiple_variant_decomposition(data_frame["variant"]).alias("mvd")
@@ -952,7 +973,7 @@ if __name__=="__main__":
 
     mnvs_miss = missense_codon_list(fapg, data_frame["variant"], data_frame["genedrugresistanceassociation"])    
 
-    var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoterdistance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))
+    var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoterdistance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))[0].alias("variant_category")
 
 
     # additional_variant_information = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_genphensql_additional_variant_information").alias("additional_info").where(F.col("description")=="merker_neutral_variant")
@@ -1062,6 +1083,7 @@ if __name__=="__main__":
         data_frame["drug"],
         gene_locus_tag,
         data_frame["genedrugresistanceassociation"],
+        bucket
     )
 
 
