@@ -14,6 +14,24 @@ from biosql_gene_views import *
 
 # Reimplementation of the Materialized View "ranked annotation" in spark
 
+
+def all_positions_by_category(variant_categories):
+    concatenate_all_position = (
+        variant_categories.alias("var_cat")
+        .groupBy(
+            F.col("gene_db_crossref_id"),
+            F.col("variant_category"),
+            F.col("predicted_effect"),
+        )
+        .agg(
+            F.concat_ws(
+                ";",
+                F.collect_set(F.col("position"))
+            ).alias("position")
+        )
+    )
+    return(concatenate_all_position)
+
 def ranked_annotation(variant_to_annotation, annotation, locus_tag, protein_id, resolved_symbol):
     ranked_annotation = (
         variant_to_annotation
