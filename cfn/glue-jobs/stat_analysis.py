@@ -455,15 +455,15 @@ if __name__=="__main__":
                     "varianttoannotation",
                     "promoterdistance",
                     "variant",
-                    "sample",
-                    "summarysequencingstats",
-                    "sequencingdata",
                     ],
                 "submission" : [
                     "pdstest",
                     "mictest",
                     "genotype",
-                    "locussequencingstats"
+                    "locussequencingstats",
+                    "sequencingdata",
+                    "sample",
+                    "summarysequencingstats",
                 ]
             }
     }
