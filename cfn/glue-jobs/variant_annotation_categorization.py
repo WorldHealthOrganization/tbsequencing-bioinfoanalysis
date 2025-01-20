@@ -687,47 +687,62 @@ if __name__=="__main__":
 
     args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "sample_fraction", "unpool_frameshifts", "log_s3_bucket"])
 
-    dbname = args["postgres_db_name"]
-    glue_dbname = args["glue_db_name"]
-
     glueContext = GlueContext(SparkContext.getOrCreate())
-
     spark = glueContext.spark_session
-
     spark._jsc.hadoopConfiguration().set('spark.sql.broadcastTimeout', '3600')
-
     job = Job(glueContext)
 
     bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
 
-    dbxref = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_biosql_dbxref"
-    )
+    dbname = args["postgres_db_name"]
+    glue_dbname = args["glue_db_name"]
 
-    sqv = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_biosql_seqfeature_qualifier_value"
-    )
+    data_frame = {}
+    tables = { 
+        {
+            "biosql": ["dbxref", "seqfeature_qualifier_value", "seqfeature_dbxref", "location", "seqfeature", "term"],
+            "public": {
+                "genphen":  [
+                    "pdstestcategory",
+                    "drug",
+                    "growthmedium",
+                    "pdsassessmentmethod",
+                    "epidemcutoffvalue",
+                    "genedrugresistanceassociation",
+                    "microdilutionplateconcentration",
+                    "annotation",
+                    "varianttoannotation",
+                    "promoter_distance",
+                    "genedrugresistanceassociation",
+                    "variant"
+                    ],
+                "submission" : ["pdstest", "mictest"]
+            }
+        }
+    }
 
-    sdc = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_biosql_seqfeature_dbxref"
-    )
 
-    protein_id = protein_id_view(dbxref, sqv, sdc).alias("protein_id")
+    for schema in tables.keys():
+        for table in tables[schema]:
+            if isinstance(table, dict):
+                tname = dbname + "_public_" + schema + "_" + table
+            elif isinstance(table, list):
+                tname = dbname + "_biosql_" + table
+            else:
+                raise ValueError
+            data_frame[table] = glueContext.create_data_frame.from_catalog(
+                    database = glue_dbname,
+                    table_name = tname
+                )
 
-    location = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_biosql_location"
-    )
 
 
+    protein_id = protein_id_view(data_frame["dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature_dbxref"]).alias("protein_id")
 
     end_positive_genes = (
-        location
+        data_frame["location"]
         .join(
-            sdc.alias("sdc"),
+            data_frame["seqfeature_dbxref"].alias("sdc"),
             "seqfeature_id",
             "inner"
         )
@@ -750,60 +765,23 @@ if __name__=="__main__":
 
     # print(end_positive_genes.show())
 
-    annot = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_public_genphen_annotation"
-    )
+    fapg = formatted_annotation_per_gene(data_frame["varianttoannotation"], data_frame["annotation"], data_frame["dbxref"], protein_id).alias("fapg")
 
-    vta = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_public_genphen_varianttoannotation"
-    )
-
-    fapg = formatted_annotation_per_gene(vta, annot, dbxref, protein_id).alias("fapg")
-
-    promoter_distance = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_public_genphen_promoterdistance"
-    )
-
-    tier = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_public_genphen_genedrugresistanceassociation"
-    ).alias("tier")
-
-    s3 = boto3.resource('s3')
-
-    variant = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_public_genphen_variant"
-    )
-
-    mvd = multiple_variant_decomposition(variant).alias("mvd")
+    mvd = multiple_variant_decomposition(data_frame["variant"]).alias("mvd")
     
-    san = sanitize_synonymous_variant(fapg, tier, mvd)
+    san = sanitize_synonymous_variant(fapg, data_frame["genedrugresistanceassociation"], mvd)
 
-    mnvs_miss = missense_codon_list(fapg, variant, tier)    
+    mnvs_miss = missense_codon_list(fapg, data_frame["variant"], data_frame["genedrugresistanceassociation"])    
 
-    var_cat = tiered_drug_variant_categories(fapg, san, tier, variant, mvd, promoter_distance, mnvs_miss, bool(int(args["unpool_frameshifts"])))
+    var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoter_distance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))
 
     overlap = var_cat[1]
 
     var_cat = var_cat[0]
 
-    seqfeature = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_biosql_seqfeature"
-    ).alias("seqfeature")
+    gene_name = gene_or_locus_tag_view(data_frame["seqfeature_dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature"], data_frame["term"], "gene_symbol").alias("gene")
 
-    term = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname+"_biosql_term"
-    ).alias("term1")
-
-    gene_name = gene_or_locus_tag_view(sdc, sqv, seqfeature, term, "gene_symbol").alias("gene")
-
-    locus_tag = gene_or_locus_tag_view(sdc, sqv, seqfeature, term, "rv_symbol").alias("locus_tag")
+    locus_tag = gene_or_locus_tag_view(data_frame["seqfeature_dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature"], data_frame["term"], "rv_symbol").alias("locus_tag")
 
     gene_locus_tag = merge_gene_locus_view(gene_name, locus_tag).alias("gene_locus_tag")
 
@@ -827,7 +805,7 @@ if __name__=="__main__":
             "position"
         )
         .join(
-            variant.alias("variant1"),
+            data_frame["variant"].alias("variant1"),
             "variant_id",
             "inner"
         )
@@ -891,6 +869,8 @@ if __name__=="__main__":
     #data = output.getvalue()
 
     #s3.Bucket('aws-glue-assets-231447170434-us-east-1').put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv", Body=data)
+
+    s3 = boto3.resource('s3')
 
     csv_buffer = io.BytesIO()
     variant_mapping.to_csv(csv_buffer, index=False)
