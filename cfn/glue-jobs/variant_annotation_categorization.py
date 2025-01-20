@@ -699,7 +699,6 @@ if __name__=="__main__":
 
     data_frame = {}
     tables = { 
-        {
             "biosql": ["dbxref", "seqfeature_qualifier_value", "seqfeature_dbxref", "location", "seqfeature", "term"],
             "public": {
                 "genphen":  [
@@ -712,28 +711,36 @@ if __name__=="__main__":
                     "microdilutionplateconcentration",
                     "annotation",
                     "varianttoannotation",
-                    "promoter_distance",
+                    "promoterdistance",
                     "genedrugresistanceassociation",
                     "variant"
                     ],
                 "submission" : ["pdstest", "mictest"]
             }
-        }
     }
 
 
     for schema in tables.keys():
-        for table in tables[schema]:
-            if isinstance(table, dict):
-                tname = dbname + "_public_" + schema + "_" + table
-            elif isinstance(table, list):
+        if isinstance(tables[schema], list):
+            for table in tables[schema]:
                 tname = dbname + "_biosql_" + table
-            else:
-                raise ValueError
-            data_frame[table] = glueContext.create_data_frame.from_catalog(
+                print(tname)
+                data_frame[table] = glueContext.create_data_frame.from_catalog(
                     database = glue_dbname,
                     table_name = tname
                 )
+        elif isinstance(tables[schema], dict):
+            for app in tables[schema].keys():
+                for table in tables[schema][app]:
+                    tname = dbname + "_" + schema + "_" + app + "_" + table
+                    print(tname)
+                    data_frame[table] = glueContext.create_data_frame.from_catalog(
+                        database = glue_dbname,
+                        table_name = tname
+                    )
+        else: 
+            raise ValueError
+
 
 
 
@@ -773,7 +780,7 @@ if __name__=="__main__":
 
     mnvs_miss = missense_codon_list(fapg, data_frame["variant"], data_frame["genedrugresistanceassociation"])    
 
-    var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoter_distance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))
+    var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoterdistance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))
 
     overlap = var_cat[1]
 
