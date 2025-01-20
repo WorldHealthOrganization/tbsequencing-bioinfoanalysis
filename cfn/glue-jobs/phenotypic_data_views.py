@@ -699,6 +699,10 @@ def preparing_cc_cc_atu_data_for_final_algorithm(mic, drug, plate_conc, ecoff, t
 
     return(final_bin_mic_cc, final_bin_mic_cc_atu)
 
+
+
+   
+
 # If running as main, we output a summary excel of ALL tests incerted, with minimal filterings
 # Used for quality control of the binarization process for instance
 
@@ -720,49 +724,53 @@ if __name__ == "__main__":
     dbname = args["postgres_db_name"]
     glue_dbname = args["glue_db_name"]
 
+    data_frame = {}
+    tables = {
+        "genphen":  ["pdstestcategory", "drug", "growthmedium", "pdsassessmentmethod", "epidemcutoffvalue", "genedrugresistanceassociation", "microdilutionplateconcentration"],
+        "submission" : ["pdstest", "mictest"]
+    }
 
-    # Main sources
-    phenotypes = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname + "_public_submission_pdstest"
-    )
-    
-    phenotypes_category = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname + "_public_genphen_pdstestcategory"
-    )
 
-    drug = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name =  dbname + "_public_genphen_drug"
-    )
+    for schema in tables.keys():
+        for table in tables[schema]:
+            tname = dbname + "_public_" + schema + "_" + table
+            data_frame[table] = glueContext.create_data_frame.from_catalog(
+                database = glue_dbname,
+                table_name = tname
+            )
 
-    growth_medium = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name =  dbname + "_public_genphen_growthmedium"
-    )
 
-    method = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name =  dbname + "_public_genphen_pdsassessmentmethod"
+    data_frame["mictest"] = (
+        data_frame["mictest"]
+        .alias("mic")
+        .withColumnRenamed(
+            "range",
+            "mic_value"
+        )
     )
 
-    categorized_phenotypes = join_phenotypes_with_categories(phenotypes, phenotypes_category, drug, growth_medium, method)
+    categorized_phenotypes = join_phenotypes_with_categories(
+        data_frame["pdstest"],
+        data_frame["pdstestcategory"],
+        data_frame["drug"],
+        data_frame["growthmedium"],
+        data_frame["pdsassessmentmethod"]
+    )
 
     categories_count = (
         categorized_phenotypes.alias("categorized")
         .join(
-            drug,
+            data_frame["drug"],
             "drug_id",
             "inner"
         )
         .join(
-            growth_medium,
+            data_frame["growthmedium"],
             "medium_id",
             "left"
         )
         .join(
-            method,
+            data_frame["pdsassessmentmethod"],
             "method_id",
             "left"
         )
@@ -795,40 +803,19 @@ if __name__ == "__main__":
         )
     )
 
-    mic = (
-        glueContext.create_data_frame.from_catalog(
-            database = glue_dbname,
-            table_name = dbname + "_public_submission_mictest"
-        )
-        .alias("mic")
-        .withColumnRenamed(
-            "range",
-            "mic_value"
-        )
+
+    bin_mics = binarize_mic_test(
+        data_frame["mictest"],
+        data_frame["epidemcutoffvalue"],
+        data_frame["microdilutionplateconcentration"],
+        data_frame["drug"],
+        CC_ATU=False
     )
-
-    
-    ecoff = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name = dbname + "_public_genphen_epidemcutoffvalue"
-    ).alias("ecoff")
-
-    tier = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name =  dbname + "_public_genphen_genedrugresistanceassociation"
-    ).alias("tier")
-
-    plate_conc = glueContext.create_data_frame.from_catalog(
-        database = glue_dbname,
-        table_name =  dbname + "_public_genphen_microdilutionplateconcentration"
-    ).alias("conc")
-
-    bin_mics = binarize_mic_test(mic, ecoff, plate_conc, drug, CC_ATU=False)
 
     mics_counts = (
         bin_mics.alias("categorized_mics")
         .join(
-            drug,
+            data_frame["drug"],
             "drug_id",
             "inner"
         )
@@ -851,14 +838,17 @@ if __name__ == "__main__":
         )
     )
 
-    bin_mic_cc_cc_atu = filter_tests_for_CC_CC_ATU(mic, drug).drop("drug_name")
+    bin_mic_cc_cc_atu = filter_tests_for_CC_CC_ATU(
+        data_frame["mictest"],
+        data_frame["drug"]
+    ).drop("drug_name")
 
     bin_mic_cc = rename_CC_CC_ATU_phenotypic_category(
         binarize_mic_test(
             bin_mic_cc_cc_atu,
-            ecoff,
-            plate_conc,
-            drug,
+            data_frame["epidemcutoffvalue"],
+            data_frame["microdilutionplateconcentration"],
+            data_frame["drug"],
             CC_ATU=False
         ),
         CC_ATU=False
@@ -868,7 +858,7 @@ if __name__ == "__main__":
     bin_mic_cc_counts = (
         bin_mic_cc
         .join(
-            drug,
+            data_frame["drug"],
             "drug_id",
             "inner"
         )
@@ -894,9 +884,9 @@ if __name__ == "__main__":
     bin_mic_cc_atu = rename_CC_CC_ATU_phenotypic_category(
         binarize_mic_test(
             bin_mic_cc_cc_atu,
-            ecoff,
-            plate_conc,
-            drug,
+            data_frame["epidemcutoffvalue"],
+            data_frame["microdilutionplateconcentration"],
+            data_frame["drug"],
             CC_ATU=True
         ),
         CC_ATU=True
@@ -905,7 +895,7 @@ if __name__ == "__main__":
     bin_mic_cc_atu_counts = (
         bin_mic_cc_atu
         .join(
-            drug,
+            data_frame["drug"],
             "drug_id",
             "inner"
         )
@@ -929,7 +919,7 @@ if __name__ == "__main__":
     )
 
     s3 = boto3.resource('s3')
-
+    
     output = io.BytesIO()
     writer = pandas.ExcelWriter(output, engine="openpyxl")
     categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
