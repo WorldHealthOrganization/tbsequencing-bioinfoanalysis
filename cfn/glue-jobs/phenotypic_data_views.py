@@ -919,16 +919,31 @@ if __name__ == "__main__":
     )
 
     s3 = boto3.resource('s3')
-    
-    output = io.BytesIO()
-    writer = pandas.ExcelWriter(output, engine="openpyxl")
-    categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
-    mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
-    bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
-    bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
-    writer.save()
-    data = output.getvalue()
-    
+
     bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
 
-    s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)
+    try:
+        output = io.BytesIO()
+        writer = pandas.ExcelWriter(output, engine="openpyxl")
+        categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
+        mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
+        bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
+        bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
+        writer.save()
+        data = output.getvalue()
+        s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)
+
+    except ModuleNotFoundError:
+        csv_buffer = io.BytesIO()
+        categories_count.toPandas().to_csv(csv_buffer, index=False)
+        s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories_count.csv").put(Body=csv_buffer.getvalue())
+
+        csv_buffer = io.BytesIO()
+        mics_counts.toPandas().to_csv(csv_buffer, index=False)
+        s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/mic_count.csv").put(Body=csv_buffer.getvalue())
+
+        # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
+        # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
+
+
+
