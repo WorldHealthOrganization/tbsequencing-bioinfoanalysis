@@ -1,3 +1,5 @@
+import pandas, io, boto3, datetime, sys
+
 from awsglue.transforms import *
 from awsglue.utils import getResolvedOptions
 from awsglue.context import GlueContext
@@ -11,6 +13,24 @@ import pyspark.sql.functions as F
 from biosql_gene_views import *
 
 # Reimplementation of the Materialized View "ranked annotation" in spark
+
+
+def all_positions_by_category(variant_categories):
+    concatenate_all_position = (
+        variant_categories.alias("var_cat")
+        .groupBy(
+            F.col("gene_db_crossref_id"),
+            F.col("variant_category"),
+            F.col("predicted_effect"),
+        )
+        .agg(
+            F.concat_ws(
+                ";",
+                F.collect_set(F.col("position"))
+            ).alias("position")
+        )
+    )
+    return(concatenate_all_position)
 
 def ranked_annotation(variant_to_annotation, annotation, locus_tag, protein_id, resolved_symbol):
     ranked_annotation = (
@@ -175,8 +195,8 @@ def formatted_annotation_per_gene(variant_to_annotation, annotation, db_crossref
         # Otherwise the same variant would be extracted twice.
         .where(
             (F.col("protein_annotation.reference_db_crossref_id").isNotNull() & (F.col("annotation1.predicted_effect")!="upstream_gene_variant"))
+            | (F.col("annotation1.predicted_effect").isin(["non_coding_transcript_exon_variant", "feature_ablation"]))
             | ((F.col("annotation1.predicted_effect")=="upstream_gene_variant") & F.col("protein_annotation.hgvs_value").isNull())
-            | (F.col("annotation1.predicted_effect").isin(["non_coding_transcript_exon_variant", "feature_ablation"]))            
         )
         .select(
             F.col("vta1.variant_id"),
@@ -324,35 +344,7 @@ def missense_codon_list(formatted_annotation_per_gene, variant, tier):
 
     return(
         mnvs_to_missense
-        # .select(
-        #     F.col("variant_id"),
-        #     F.col("gene_db_crossref_id"),
-        #     F.col("all_codons_missense"),
-        # )
     )
-
-    # selected_syn = (
-    #     multiple_variant_decomposition.alias("mvd")
-    #     .join(
-    #         formatted_annotation_per_gene.alias("fapg2"),
-    #         on=(F.col("mvd.snv_id")==F.col("fapg2.variant_id"))
-    #             & (F.col("fapg2.predicted_effect")=="synonymous_variant"),
-    #         how="inner"
-    #     )
-    #     .alias("synonymous")
-    # )
-
-    # mnvs_missense_syn = (
-    #     mnvs_to_missense
-    #     .join(
-    #         selected_syn,
-    #         on=(F.col("synonymous.mnv_id")==F.col("mnv_to_missense.variant_id"))
-    #             & ~F.array_contains("all_codons_missense", F.floor(1+(F.col("synonymous.distance_to_reference")-1)/3)),
-    #         how="left"
-    #     )
-    # )
-
-    # return(mnvs_missense_syn)
 
 # Beautiful (actually awful) query that associates variant_id to its variant category on the gene of interest first
 # Variants leading to more than one missense mutation (on different codons) are already handled by decomposition of the SnpEff annotation 
@@ -366,14 +358,14 @@ def tiered_drug_variant_categories(
         multiple_variant_decomposition,
         promoter_distance,
         missense_codon_list,
-        pool_frameshift=False
+        unpooling_fs
     ):
-    
-    if not pool_frameshift:
-        hgvs_frameshift="nucleotide_annotation"
+
+    if unpooling_fs:
+        annot_fs = "nucleotidic_annotation"
     else:
-        hgvs_frameshift="proteic_annotation"
-    
+        annot_fs = "proteic_annotation"
+
     variant_categories = (
         formatted_annotation_per_gene.alias("fapg1")
         .join(
@@ -473,7 +465,7 @@ def tiered_drug_variant_categories(
             # We rank then 1. stop_lost+frameshift 2. stop_lost, 3. frameshift, stop_gained, start_lost, 4. initiator_codon_variant
             .when(
                 F.col("fapg1.predicted_effect").rlike(".*stop_lost.*") & F.col("fapg1.predicted_effect").rlike(".*frameshift.*"),
-                F.col("fapg1.nucleotidic_annotation")
+                F.col("fapg1."+annot_fs)
             )
             .when(
                 F.col("fapg1.predicted_effect").rlike(".*stop_lost.*"),
@@ -491,10 +483,10 @@ def tiered_drug_variant_categories(
                 F.col("fapg1.predicted_effect").rlike(".*stop_gained.*"),
                 F.regexp_replace(F.col("fapg1.proteic_annotation"), "fs$", "*")
             )
-            # frameshift depends on the variable pool_frameshift
+            # frameshift is now variable
             .when(
                 F.col("fapg1.predicted_effect").rlike(".*frameshift.*"),
-                F.col("fapg1."+hgvs_frameshift)
+                F.col("fapg1."+annot_fs)
             )
             # Sanitize initiator codon variant so that the category is different from the start_lost
             # Getting the nucleotidic annotation for initiator codon variants
@@ -636,6 +628,7 @@ def tiered_drug_variant_categories(
                 )
             )
         )
+        .distinct()
         .where(F.col("rank_all_categories")==1)
         # We need to handle the case where a promoter region is shared between different gene
         # We rank the variants through tier, gene_id, 
@@ -654,7 +647,11 @@ def tiered_drug_variant_categories(
                 )
             )
         )
-        .where(F.col("rank_upstream_categories")==1)
+    )
+
+    overlapping = (
+        variant_categories
+        .where(F.col("rank_upstream_categories")==2)
         .select(
             F.col("drug_id"),
             F.col("tier"),
@@ -667,5 +664,284 @@ def tiered_drug_variant_categories(
         )
         .distinct()
     )
-    return(variant_categories)
 
+    overlapping_all_annotations = (
+        variant_categories
+        .join(
+            overlapping,
+            ["variant_id", "drug_id"],
+            "inner"
+        )
+        .sort(
+            "variant_id",
+            "drug_id",
+        )
+    )
+
+    variant_categories = (
+        variant_categories
+        .where(
+            (F.col("rank_upstream_categories")==1)
+            | (F.col("curated_effect")=="feature_ablation")
+        )
+        .select(
+            F.col("drug_id"),
+            F.col("tier"),
+            F.col("fapg1.gene_db_crossref_id").alias("gene_db_crossref_id"),
+            F.col("variant_id"),
+            F.col("position"),
+            F.col("variant_category"),
+            F.col("curated_effect").alias("predicted_effect"),
+            F.col("distance_to_reference"),
+        )
+        .distinct()
+    )
+    return(variant_categories, overlapping_all_annotations)
+
+
+if __name__=="__main__":
+
+    d = datetime.datetime.now().isoformat()
+
+    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "sample_fraction", "unpool_frameshifts", "log_s3_bucket"])
+
+    glueContext = GlueContext(SparkContext.getOrCreate())
+    spark = glueContext.spark_session
+    spark._jsc.hadoopConfiguration().set('spark.sql.broadcastTimeout', '3600')
+    job = Job(glueContext)
+
+    bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
+
+    dbname = args["postgres_db_name"]
+    glue_dbname = args["glue_db_name"]
+
+    data_frame = {}
+    tables = { 
+            "biosql": ["dbxref", "seqfeature_qualifier_value", "seqfeature_dbxref", "location", "seqfeature", "term"],
+            "public": {
+                "genphen":  [
+                    "pdstestcategory",
+                    "drug",
+                    "growthmedium",
+                    "pdsassessmentmethod",
+                    "epidemcutoffvalue",
+                    "genedrugresistanceassociation",
+                    "microdilutionplateconcentration",
+                    "annotation",
+                    "varianttoannotation",
+                    "promoterdistance",
+                    "genedrugresistanceassociation",
+                    "variant"
+                    ],
+                "submission" : ["pdstest", "mictest"]
+            }
+    }
+
+
+    for schema in tables.keys():
+        if isinstance(tables[schema], list):
+            for table in tables[schema]:
+                tname = dbname + "_biosql_" + table
+                print(tname)
+                data_frame[table] = glueContext.create_data_frame.from_catalog(
+                    database = glue_dbname,
+                    table_name = tname
+                )
+        elif isinstance(tables[schema], dict):
+            for app in tables[schema].keys():
+                for table in tables[schema][app]:
+                    tname = dbname + "_" + schema + "_" + app + "_" + table
+                    print(tname)
+                    data_frame[table] = glueContext.create_data_frame.from_catalog(
+                        database = glue_dbname,
+                        table_name = tname
+                    )
+        else: 
+            raise ValueError
+
+
+
+
+    protein_id = protein_id_view(data_frame["dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature_dbxref"]).alias("protein_id")
+
+    end_positive_genes = (
+        data_frame["location"]
+        .join(
+            data_frame["seqfeature_dbxref"].alias("sdc"),
+            "seqfeature_id",
+            "inner"
+        )
+        .join(
+            protein_id.alias("prot"),
+            on=F.col("prot.gene_db_crossref_id")==F.col("sdc.dbxref_id"),
+            how="inner"
+        )
+        .where(
+            F.col("strand")==1
+        )
+        .select(
+            F.col("gene_db_crossref_id"),
+            (F.col("end_pos")-2).alias("end_pos"),
+        )
+        .distinct()
+    )
+
+    # print(end_positive_genes.count())
+
+    # print(end_positive_genes.show())
+
+    fapg = formatted_annotation_per_gene(data_frame["varianttoannotation"], data_frame["annotation"], data_frame["dbxref"], protein_id).alias("fapg")
+
+    mvd = multiple_variant_decomposition(data_frame["variant"]).alias("mvd")
+    
+    san = sanitize_synonymous_variant(fapg, data_frame["genedrugresistanceassociation"], mvd)
+
+    mnvs_miss = missense_codon_list(fapg, data_frame["variant"], data_frame["genedrugresistanceassociation"])    
+
+    var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoterdistance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))
+
+    overlap = var_cat[1]
+
+    var_cat = var_cat[0]
+
+    gene_name = gene_or_locus_tag_view(data_frame["seqfeature_dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature"], data_frame["term"], "gene_symbol").alias("gene")
+
+    locus_tag = gene_or_locus_tag_view(data_frame["seqfeature_dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature"], data_frame["term"], "rv_symbol").alias("locus_tag")
+
+    gene_locus_tag = merge_gene_locus_view(gene_name, locus_tag).alias("gene_locus_tag")
+
+    overlap = (
+        overlap
+        .join(
+            gene_locus_tag,
+            "gene_db_crossref_id",
+            "inner"
+        )
+    )
+
+    # csv_buffer = io.BytesIO()
+    # overlap.toPandas().to_csv(csv_buffer, index=False)
+    # s3.Object("aws-glue-assets-231447170434-us-east-1", args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/overlap.csv").put(Body=csv_buffer.getvalue())
+
+
+    variant_mapping = (
+        var_cat.alias("var_cat")
+        .drop(
+            "position"
+        )
+        .join(
+            data_frame["variant"].alias("variant1"),
+            "variant_id",
+            "inner"
+        )
+        .join(
+            gene_locus_tag,
+            "gene_db_crossref_id",
+            "inner"
+        )
+        # trying to remove incorrect stop codon annotations
+        # snpEff has a bug when trying to left align MCNVs on positive strand stop codons
+        # it associated them with missense annotation a little upstream of the stop codons
+        # which is wrong
+        .join(
+            end_positive_genes.alias("stop_codons"),
+            on=(F.col("stop_codons.gene_db_crossref_id")==F.col("var_cat.gene_db_crossref_id"))
+                & (
+                    (
+                        (F.col("variant1.position")==F.col("stop_codons.end_pos")) & (F.length(F.col("reference_nucleotide"))==F.length(F.col("alternative_nucleotide"))) & (F.length(F.col("reference_nucleotide"))==3)
+                    )
+                    |
+                    (
+                        (F.col("variant1.position")==(F.col("stop_codons.end_pos")+1)) & (F.length(F.col("reference_nucleotide"))==F.length(F.col("alternative_nucleotide"))) & (F.length(F.col("reference_nucleotide"))==2)
+                    )
+                    |
+                    (
+                        (F.col("variant1.position")-F.col("stop_codons.end_pos")).isin([0, 1])
+                        &
+                        (F.col("predicted_effect")=="frameshift")
+                    )
+                ),
+            how="left_anti"
+        )
+        .select(
+            F.concat_ws(
+                "_",
+                F.col("resolved_symbol"),
+                F.col("variant_category")
+            ).alias("variant"),
+            F.col("resolved_symbol"),
+            F.col("variant_category"),
+            F.col("predicted_effect"),
+            F.col("var_cat.variant_id"),
+            F.col("variant1.chromosome"),
+            F.col("variant1.position"),
+            F.col("variant1.reference_nucleotide"),
+            F.col("variant1.alternative_nucleotide"),
+        )
+        .distinct()
+        .sample(fraction=float(args["sample_fraction"]))
+        .toPandas()
+    )
+
+
+
+
+#    writer = pandas.ExcelWriter(output, engine="openpyxl")
+
+    
+    #writer.save()
+    
+    #data = output.getvalue()
+
+    #s3.Bucket('aws-glue-assets-231447170434-us-east-1').put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv", Body=data)
+
+    s3 = boto3.resource('s3')
+
+    csv_buffer = io.BytesIO()
+    variant_mapping.to_csv(csv_buffer, index=False)
+    s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
+
+
+    # fill_new_table = (
+    #     DynamicFrame.fromDF(
+    #         var_cat
+    #         .select(
+    #             F.col("variant_id"),
+    #             F.col("gene_db_crossref_id"),
+    #             F.col("predicted_effect"),
+    #             F.col("variant_category"),
+    #             F.col("distance_to_reference"),
+    #         )
+    #         .alias("")
+    #         .distinct(),
+    #         glueContext,
+    #         "final"
+    #     )
+    #     .resolveChoice(
+    #         choice="match_catalog",
+    #         database= args["glue_database_name"],
+    #         table_name="postgres_genphensql_tiered_variant_categories"
+    #     )
+    # )
+
+    # datasink5 = glueContext.write_dynamic_frame.from_catalog(frame = fill_new_table, database = args["glue_database_name"], table_name = "postgres_genphensql_tiered_variant_categories", transformation_ctx = "datasink5")
+
+
+    # fill_new_table_ranked_annotation = (
+    #     DynamicFrame.fromDF(
+    #         ranked_annotation(vta, annot, locus_tag, protein_id, gene_locus_tag)
+    #         .alias("")
+    #         .distinct(),
+    #         glueContext,
+    #         "final"
+    #     )
+    #     .resolveChoice(
+    #         choice="match_catalog",
+    #         database= args["glue_database_name"],
+    #         table_name="postgres_genphensql_ranked_annotation"
+    #     )
+    # )
+
+    # datasink6 = glueContext.write_dynamic_frame.from_catalog(frame = fill_new_table_ranked_annotation, database = args["glue_database_name"], table_name = "postgres_genphensql_ranked_annotation", transformation_ctx = "datasink6")
+
+    # job.commit()
