@@ -760,6 +760,10 @@ if __name__ == "__main__":
             "range",
             "mic_value"
         )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), " Middlebrook", "")
+        )
     )
 
     categorized_phenotypes = join_phenotypes_with_categories(
