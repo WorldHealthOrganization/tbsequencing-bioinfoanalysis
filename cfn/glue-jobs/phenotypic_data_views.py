@@ -433,7 +433,7 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
             ecoff_values.alias("ecoff"),
             on=(F.col("ecoff.drug_id")==F.col("mic.drug_id"))
                 & (F.col("mic.plate")==F.col("ecoff.medium_name")),
-            how="inner"
+            how="left"
         )
         # Same regexp, extract different groups
         # Cleaner than two different regexpes for each group
@@ -464,19 +464,21 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
             F.when(F.col("upper_boundary")<=F.col("ecoff.value"), 'S')
             .when(F.col("lower_boundary")>=F.col("ecoff.value"), 'R')
         )
-        .where(
-            F.col("test_result").isin('R', 'S')
-        )
+        # .where(
+        #     F.col("test_result").isin('R', 'S')
+        # )
         .select(
                 F.col("sample_id"),
                 F.col("mic.drug_id").alias("drug_id"),
                 F.col("plate"),
                 F.col("mic_value"),
                 F.col("test_result"),
-                F.when(F.col("mic.plate")=="MYCOTB", F.lit("MYCOTB_MIC"))
+                F.when(
+                    F.col("mic.plate")=="MYCOTB", F.lit("MYCOTB_MIC"))
                     .when(F.col("mic.plate").isin("UKMYC5", "UKMYC6"), F.lit("CRyPTIC_MIC"))
                     .when((F.col("drug_name")=="Pretomanid") & (F.col("mic.plate")=="MGIT"), F.lit("WHO_current"))
-                    .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result"))).alias("phenotypic_category"),
+                    .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result"))
+                ).alias("phenotypic_category"),
         )
     )
     return(binarized_plates.alias(""))
