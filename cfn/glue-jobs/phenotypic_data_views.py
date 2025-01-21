@@ -762,7 +762,7 @@ if __name__ == "__main__":
         )
         .withColumn(
             "plate",
-            F.regexp_replace(F.col("plate"), " Middlebrook", "")
+            F.regexp_replace(F.col("plate"), "Middlebrook", "")
         )
     )
 
