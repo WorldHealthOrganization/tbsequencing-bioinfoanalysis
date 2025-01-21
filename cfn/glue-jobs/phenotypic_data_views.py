@@ -179,9 +179,9 @@ def join_phenotypes_with_categories(phenotype, phenotype_category, drug, growth_
                 )
             )
         )
-        .where(
-            F.col("phenotypic_category").isNotNull()
-        )
+        # .where(
+        #     F.col("phenotypic_category").isNotNull()
+        # )
         .select(
             "phenotype.*",
             F.col("phenotypic_category")
