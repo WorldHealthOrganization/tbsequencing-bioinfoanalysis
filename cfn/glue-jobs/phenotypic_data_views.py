@@ -572,8 +572,12 @@ def preparing_binary_data_for_final_algorithm(phenotypes, phenotypes_category, d
 
     # Select samples based on their phenotype 
     # Only keep clean samples (ie all results either R or S)
+    # and which have an attributed category
     categorized_phenotypes = (
         join_phenotypes_with_categories(phenotypes, phenotypes_category, drug, growth_medium, method)
+        .where(
+            F.col("phenotypic_category").isNotNull()
+        )
     )
 
     # Ofloxacin->levofloxacin, prothionamide->ethionamide
