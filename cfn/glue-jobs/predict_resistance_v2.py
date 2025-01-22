@@ -137,7 +137,7 @@ gene_locus_tag = (
 promoter_distance = glueContext.create_data_frame.from_catalog(database = glue_db_name, table_name = dbname+"_public_genphen_promoterdistance")
 
 var_cat = (
-    tiered_drug_variant_categories(fapg, san, tier, variant, mvd, promoter_distance, missense_codon_list(fapg, variant, tier), pool_frameshift=True)
+    tiered_drug_variant_categories(fapg, san, tier, variant, mvd, promoter_distance, missense_codon_list(fapg, variant, tier), unpooling_fs=False)[0]
     .drop(
         "position"
     )
