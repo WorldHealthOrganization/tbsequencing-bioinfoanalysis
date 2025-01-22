@@ -427,14 +427,14 @@ if __name__=="__main__":
 
     d = datetime.datetime.now().isoformat()
 
-    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "sample_fraction", "unpool_frameshifts", "log_s3_bucket"])
+    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "unpool_frameshifts", "TempDir"])
 
     glueContext = GlueContext(SparkContext.getOrCreate())
     spark = glueContext.spark_session
     spark._jsc.hadoopConfiguration().set('spark.sql.broadcastTimeout', '3600')
     job = Job(glueContext)
 
-    bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
+    bucket = args["TempDir"].split("s3://")[1].strip("/")
 
     dbname = args["postgres_db_name"]
     glue_dbname = args["glue_db_name"]

@@ -447,20 +447,19 @@ locals {
       glue_version      = "4.0"
       number_of_workers = "3"
       worker_type       = "G.2X"
-
       tags = merge(local.tags, {
         Name = local.prefix
       })
 
       default_arguments = {
-        "--job-bookmark-option" = "job-bookmark-disable",
-        "--glue_db_name"        = module.glue.glue_database_name["glue_database"],
-        "--postgres_db_name"    = data.aws_ssm_parameter.db_name.value,
-        "--log_s3_bucket"       = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
-        "--sample_fraction"     = 1,
-        "--unpool_frameshifts"  = 1,
-        "--extra-py-files"      = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/ETL_tools.zip",
-        "--TempDir"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--job-bookmark-option"   = "job-bookmark-disable",
+        "--glue_db_name"          = module.glue.glue_database_name["glue_database"],
+        "--postgres_db_name"      = data.aws_ssm_parameter.db_name.value,
+        "--unpool_frameshifts"    = 1,
+        "--extra-py-files"        = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/ETL_tools.zip",
+        "--TempDir"               = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--enable-spark-ui"       = true
+        "--spark-event-logs-path" = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/spark-logs/data_extraction/"
       }
       script_location = "s3://${module.s3_for_fsx.bucket_id["glue-scripts"]}/glue-jobs/stat_analysis.py"
     }
