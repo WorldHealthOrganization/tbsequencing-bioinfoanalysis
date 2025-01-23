@@ -425,7 +425,7 @@ def twalker_extraction(genotype_categorized, position, filtered_sample_drug, loc
 
 if __name__=="__main__":
 
-    d = datetime.datetime.now().isoformat()
+    d = datetime.datetime.now().isoformat().replace(":", "-")
 
     args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "unpool_frameshifts", "TempDir"])
 
@@ -948,7 +948,7 @@ if __name__=="__main__":
 
     writer.save()
     data = output.getvalue()
-    s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
+    s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
    
 
     # We are done with phenotypes
