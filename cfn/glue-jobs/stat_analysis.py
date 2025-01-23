@@ -936,7 +936,7 @@ if __name__=="__main__":
     #     )
     # )
 
-    s3 = boto3.client("s3")
+    s3 = boto3.resource("s3")
 
     output = io.BytesIO()
     writer = pandas.ExcelWriter(output, engine="openpyxl")
