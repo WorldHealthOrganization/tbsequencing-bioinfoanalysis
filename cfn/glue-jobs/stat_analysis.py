@@ -936,6 +936,8 @@ if __name__=="__main__":
     #     )
     # )
 
+    s3 = boto3.client("s3")
+
     output = io.BytesIO()
     writer = pandas.ExcelWriter(output, engine="openpyxl")
     drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
