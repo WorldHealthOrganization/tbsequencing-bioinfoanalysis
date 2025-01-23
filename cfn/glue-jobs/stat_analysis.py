@@ -936,19 +936,18 @@ if __name__=="__main__":
     #     )
     # )
 
-    # output = io.BytesIO()
-    # writer = pandas.ExcelWriter(output, engine="openpyxl")
-    # drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
-    # writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
+    output = io.BytesIO()
+    writer = pandas.ExcelWriter(output, engine="openpyxl")
+    drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
+    writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
     # samples_per_country.join(samples_per_rif_r, on=["country_usual_name", "three_letters_code"], how="left").sort("country_usual_name").toPandas().to_excel(writer, sheet_name="Samples country count", index=False)
     # non_public_sequencing_data.toPandas().to_excel(writer, sheet_name="Non pub data", index=False)
     # samples_per_rif_r_per_lineage.toPandas().to_excel(writer, sheet_name="Lineage_data", index=False)
 
-    # writer.save()
-    # data = output.getvalue()
-
-    # s3.Bucket('aws-glue-assets-231447170434-us-east-1').put_object(Key=args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
-
+    writer.save()
+    data = output.getvalue()
+    s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
+   
 
     # We are done with phenotypes
     # Drop then, but keep the list of (sample, drug) that are relevant for the rest
