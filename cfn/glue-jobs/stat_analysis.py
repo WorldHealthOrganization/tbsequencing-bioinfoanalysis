@@ -15,223 +15,8 @@ import pyspark.sql.functions as F
 from phenotypic_data_views import *
 from biosql_gene_views import *
 from variant_annotation_categorization import *
-# from variant_classification_algorithms import *
-# from neutral_variants import *
-# from genetic_relatedness_matrix import *
 
-# def farhat_lab_extraction(genotype_categorized, most_frequent_position, all_position, filtered_sample_drug, variant_category, loc_seq_stats, sample, drug, gene_locus_tag):
-
-#     # getting the complete list of (genomic-variants, drug) pairs
-#     relevant_variant = (
-#         genotype_categorized
-#         .select(
-#             F.col("variant_id"),
-#             F.col("drug_id"),
-#         )
-#         .distinct()
-#     )
-
-#     # We do a left join on genotypes instead of an inner join
-#     final_results = (
-#         filtered_sample_drug
-#         .join(
-#             variant_category
-#             .join(
-#                 relevant_variant,
-#                 on=["variant_id", "drug_id"],
-#                 how="left_semi"
-#             ),
-#             on="drug_id",
-#             how="inner"
-#         )
-#         .join(
-#             genotype_categorized.select(
-#                 F.col("variant_id"),
-#                 F.col("sample_id"),
-#                 F.col("af"),
-#                 F.col("total_dp")
-#             ),
-#             on=["sample_id", "variant_id"],
-#             how="left"
-#         )
-#         .groupBy(
-#             F.col("filtered_samples.sample_id"),
-#             F.col("gene_db_crossref_id"),
-#             F.col("drug_id"),
-#             F.col("tier"),
-#             F.col("variant_category"),
-#         )
-#         .agg(
-#             {"af": "max",
-#             "total_dp": "max"}
-#         )
-#         .alias("final_results")
-#     )
-
-#     # identifying genes that have well identified deletions so that they don't count as sequencing defects.
-#     deletions = (
-#         final_results
-#         .where(
-#             F.col("variant_category").isin("deletion", "frameshift", "inframe_deletion")
-#         )
-#         .select(
-#             F.col("sample_id"),
-#             F.col("gene_db_crossref_id"),
-#         )
-#         .distinct()
-#     )
-
-#     # narrowing down the samples which have at least one sequencing defect
-#     missing_sample_names = (
-#         loc_seq_stats.alias("loc_seq_stats")
-#         .join(
-#             sample.select(
-#                 F.col("sample_id"),
-#                 F.col("sample_name"),
-#             ),
-#             on="sample_id",
-#             how="inner"
-#         )
-#         .join(
-#             tier,
-#             on="gene_db_crossref_id",
-#             how="inner"
-#         )
-#         .join(
-#             filtered_sample_drug,
-#             on=["sample_id", "drug_id"],
-#             how="left_semi"
-#         )
-#         # Discard deleted genes. They do not qualify for sequencing defects.
-#         .join(
-#             deletions.alias("deletion"),
-#             on=(F.col("deletion.sample_id")==F.col("loc_seq_stats.sample_id"))
-#             & (F.col("deletion.gene_db_crossref_id")==F.col("loc_seq_stats.gene_db_crossref_id")),
-#             how="left_anti"
-#         )
-#         .where(
-#             F.col("coverage_10x")!=1
-#         )
-#         .select(
-#             F.col("sample_name")
-#         )
-#         .distinct()
-#         .collect()
-#     )
-
-#     s_names = [x["sample_name"] for x in missing_sample_names]
-
-#     # using a push down predicate from glue so that we fetch from S3 the position specific coverage data
-#     coverage = (
-#         glueContext.create_dynamic_frame.from_catalog(
-#             database = args["glue_database_name"],
-#             table_name = "coverage_cb2f8fa7182317fd41dd87a668ced0a3",
-#             push_down_predicate="sample_name IN ('" + "','".join(s_names)+"')",
-#         )
-#         .toDF()
-#         .where(
-#             F.col("depth")<10
-#         )
-#     )
-
-#     missing_variant_categories = (
-#         coverage
-#         .join(
-#             most_frequent_position,
-#             on="position",
-#             how="left"
-#         )
-#         .join(
-#             sample.select(
-#                 F.col("sample_id"),
-#                 F.col("sample_name"),
-#             ),
-#             on="sample_name",
-#             how="inner"
-#         )
-#         .select(
-#             F.col("sample_id"),
-#             F.col("gene_db_crossref_id"),
-#             F.col("variant_category"),
-#             F.lit(True).alias("missing"),
-#         )
-#     )
-
-#     # Extracting locus-sample pairs with lack of coverage and fine graining the data
-#     final_results = (
-#         final_results
-#         .join(
-#             missing_variant_categories,
-#             on=["sample_id", "gene_db_crossref_id", "variant_category"],
-#             how="left"
-#         )
-#         .withColumn(
-#             "variant_allele_frequency",
-#             F.when(F.col("missing")==True, F.lit(None))
-#             .when(F.col("max(af)")<0.25, F.lit(0))
-#             .when(F.col("max(af)").isNotNull(), F.col("max(af)"))
-#             .otherwise(F.lit(0))
-#         )
-#         .withColumn(
-#             "variant_binary_status",
-#             F.when(F.col("missing")==True, F.lit(None))
-#             .when(F.col("max(af)")>0.75, F.lit(1))
-#             .when(F.col("max(af)")<0.25, F.lit(0))
-#             .otherwise(F.lit(0))
-#         )
-#         .drop(
-#             "max(af)",
-#             "max(total_dp)",
-#             "locus_seq_stats.gene_db_crossref_id"
-#         )
-#     )
-
-#     final_results = (
-#         final_results
-#         .join(
-#             all_position,
-#             on=["gene_db_crossref_id", "variant_category"],
-#             how="left"
-#         )
-#     )
-
-#     glueContext.write_dynamic_frame.from_options(
-#         frame=DynamicFrame.fromDF(
-#             final_results
-#             .join(
-#                 drug,
-#                 on="drug_id",
-#                 how="inner"
-#             )
-#             .join(
-#                 gene_locus_tag,
-#                 on="gene_db_crossref_id",
-#                 how="inner"
-#             )
-#             .select(
-#                 F.col("drug_name"),
-#                 F.col("final_results.sample_id"),
-#                 F.col("tier"),
-#                 F.col("resolved_symbol"),
-#                 F.col("variant_category"),
-#                 F.col("predicted_effect"),
-#                 F.lit(None).alias("neutral"),
-#                 F.col("variant_allele_frequency"),
-#                 F.col("variant_binary_status"),
-#                 F.col("position"),
-#             ),
-#             glueContext,
-#             "final"
-#         ),
-#         connection_type="s3",
-#         format="csv",
-#         connection_options={
-#             "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("/").strip("")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/full_genotypes/",
-#             "partitionKeys": ["drug_name", "tier"]
-#         }
-#     )
-
-def twalker_extraction(genotype_categorized, position, filtered_sample_drug, loc_seq_stats, drug, gene_locus_tag, tier, bucket, orphan=False):
+def solo_extraction(genotype_categorized, position, filtered_sample_drug, loc_seq_stats, drug, gene_locus_tag, tier, bucket, orphan=False):
 
     final_results = (
         filtered_sample_drug.alias("filtered_samples")
@@ -468,14 +253,6 @@ if __name__=="__main__":
             }
     }
 
-
-    # country = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_public_country")
-
-    # dataset = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_genphensql_dataset")
-
-    # dataset_to_sample = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_genphensql_dataset_to_sample")
-
-
     for schema in tables.keys():
         if isinstance(tables[schema], list):
             for table in tables[schema]:
@@ -683,7 +460,13 @@ if __name__=="__main__":
     )
 
 
-    order_categories = {'WHO': 1, "not-WHO":2, 'ALL': 3, 'CC': 4, 'CC-ATU':5}
+    order_categories = {
+        'WHO': 1,
+        "not-WHO":2,
+        'ALL': 3,
+        'CC': 4,
+        'CC-ATU':5
+    }
 
     sort_col_categories = F.create_map([F.lit(x) for x in chain(*order_categories.items())])[F.col('phenotypic_category')]
 
@@ -700,7 +483,10 @@ if __name__=="__main__":
         .select(
             F.col("drug_name"),
             F.col("phenotype"),
-            F.when(F.col("phenotypic_category")=="ALL", "not-WHO").otherwise(F.col("phenotypic_category")).alias("phenotypic_category"),
+            F.when(
+                F.col("phenotypic_category")=="ALL", "not-WHO")
+                .otherwise(F.col("phenotypic_category")
+            ).alias("phenotypic_category"),
             F.col("count")
         )
     )
@@ -766,6 +552,8 @@ if __name__=="__main__":
 
 
     # lineages = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "lineages")
+
+    # country = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_public_country")
 
     # lineages.show()
 
