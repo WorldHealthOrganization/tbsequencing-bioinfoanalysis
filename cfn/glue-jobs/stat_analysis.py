@@ -210,7 +210,7 @@ def solo_extraction(genotype_categorized, position, filtered_sample_drug, loc_se
 
 if __name__=="__main__":
 
-    d = datetime.datetime.now().isoformat()
+    d = datetime.datetime.now().isoformat().replace(":", "-")
 
     args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "unpool_frameshifts", "TempDir"])
 
@@ -240,6 +240,7 @@ if __name__=="__main__":
                     "varianttoannotation",
                     "promoterdistance",
                     "variant",
+                    "variantadditionalinfo"
                     ],
                 "submission" : [
                     "pdstest",
@@ -291,32 +292,6 @@ if __name__=="__main__":
             "sample_id"
         )
     )
-
-
-    # cryptic_qual = (
-    #     glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "cryptic_low_quality")
-    #     .select(
-    #         F.col("uniqueid").alias("sample_id"),
-    #         F.col("`attribute.1`").alias("drug_id"),
-    #     )
-    #     .where(
-    #         F.col("quality")=="LOW"
-    #     )
-    #     .alias("cryptic_quals")
-    # )
-
-    # print(mic.count())
-
-    # mic = (
-    #     mic
-    #     # .join(
-    #     #     cryptic_qual,
-    #     #     on=(F.col("cryptic_quals.sample_id")==F.col("mic.sample_id")) & (F.col("cryptic_quals.drug_id")==F.col("mic.drug_id")) & F.col("mic.plate").startswith("UKMYC"),
-    #     #     how="left_anti",
-    #     # )
-    # )
-
-    # print(mic.count())
 
     clean_phenotypes = preparing_binary_data_for_final_algorithm(
         data_frame["pdstest"],
@@ -550,193 +525,23 @@ if __name__=="__main__":
         )
     )
 
+    s3 = boto3.resource("s3")
+    try:
 
-    # lineages = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "lineages")
+        output = io.BytesIO()
+        writer = pandas.ExcelWriter(output, engine="openpyxl")
+        drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
+        # writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
+        # samples_per_country.join(samples_per_rif_r, on=["country_usual_name", "three_letters_code"], how="left").sort("country_usual_name").toPandas().to_excel(writer, sheet_name="Samples country count", index=False)
+        # non_public_sequencing_data.toPandas().to_excel(writer, sheet_name="Non pub data", index=False)
+        # samples_per_rif_r_per_lineage.toPandas().to_excel(writer, sheet_name="Lineage_data", index=False)
 
-    # country = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_public_country")
+        writer.save()
+        data = output.getvalue()
 
-    # lineages.show()
-
-    # samples_per_country = (
-    #     filtered_samples_drug_phenotypes_box
-    #     .join(
-    #         sample,
-    #         on="sample_id",
-    #         how="inner",
-    #     )
-    #     .join(
-    #         country,
-    #         on="country_id",
-    #         how="left"
-    #     )
-    #     .groupby(
-    #         F.col("country_usual_name"),
-    #         F.col("three_letters_code"),
-    #     )
-    #     .agg(
-    #         F.countDistinct("sample_id").alias("total")
-    #     )
-    # )
-
-
-    # non_public_sequencing_data = (
-    #     filtered_samples_drug_phenotypes_box
-    #     .select(
-    #         F.col("sample_id")
-    #     )
-    #     .distinct()
-    #     .join(
-    #         seq_data,
-    #         on="sample_id",
-    #         how="inner"
-    #     )
-    #     .where(
-    #         F.col("data_location")=="S3"
-    #     )
-    #     .join(
-    #         dataset_to_sample,
-    #         on="sample_id",
-    #         how="left"
-    #     )
-    #     .join(
-    #         dataset,
-    #         on="dataset_id",
-    #         how="inner"
-    #     )
-    #     .where(
-    #         ~F.col("dataset_name").startswith("SEQTREAT2020")
-    #     )
-    #     .groupby(
-    #         F.col("dataset_name"),
-    #         F.col("dataset_owner"),
-    #         F.col("contact_email")
-    #     )
-    #     .agg(
-    #         F.countDistinct("sample_id").alias("total")
-    #     )
-    # )
-
-    # samples_per_rif_r = (
-    #     filtered_samples_drug_phenotypes_box
-    #     .where(
-    #         (F.col("drug_name")=="Rifampicin")
-    #         & (F.col("phenotypic_category").isin("WHO", "ALL"))
-    #     )
-    #     .select(
-    #         F.col("sample_id"),
-    #         F.concat(F.lit("RIF_"), F.col("phenotype")).alias("RIF")
-    #     )
-    #     .distinct()
-    #     .join(
-    #         sample,
-    #         on="sample_id",
-    #         how="inner",
-    #     )
-    #     .join(
-    #         country,
-    #         on="country_id",
-    #         how="left"
-    #     )
-    #     .groupby(
-    #         F.col("country_usual_name"),
-    #         F.col("three_letters_code"),
-    #         F.col("RIF")
-    #     )
-    #     .agg(
-    #         F.countDistinct("sample_id").alias("count")
-    #     )
-    #     .groupby(
-    #         F.col("country_usual_name"),
-    #         F.col("three_letters_code")
-    #     )
-    #     .pivot(
-    #         "RIF"
-    #     )
-    #     .agg(
-    #         F.first("count")
-    #     )
-    # )
-
-    # samples_per_rif_r_per_lineage = (
-    #     filtered_samples_drug_phenotypes_box
-    #     .where(
-    #         (F.col("drug_name")=="Rifampicin")
-    #         & (F.col("phenotypic_category").isin("WHO", "ALL"))
-    #     )
-    #     .select(
-    #         F.col("sample_id"),
-    #         F.concat(F.lit("RIF_"), F.col("phenotype")).alias("RIF")
-    #     )
-    #     .distinct()
-    #     .join(
-    #         sample,
-    #         on="sample_id",
-    #         how="inner",
-    #     )
-    #     .join(
-    #         country,
-    #         on="country_id",
-    #         how="left"
-    #     )
-    #     .join(
-    #         lineages,
-    #         on="sample_id",
-    #         how="inner"
-    #     )
-    #     .withColumn(
-    #         "true_lineage",
-    #         F.split(F.col("lineage"), "\.").getItem(0)
-    #     )
-    #     .groupby(
-    #         F.col("country_usual_name"),
-    #         F.col("three_letters_code"),
-    #         F.col("true_lineage"),
-    #         F.col("RIF")
-    #     )
-    #     .agg(
-    #         F.countDistinct("sample_id").alias("count")
-    #     )
-    #     .groupby(
-    #         F.col("country_usual_name"),
-    #         F.col("three_letters_code"),
-    #         F.col("RIF"),
-    #     )
-    #     .pivot(
-    #         "true_lineage"
-    #     )
-    #     .agg(
-    #         F.first("count")
-    #     )
-    #     .na.fill(0)
-    #     .withColumn(
-    #         "L1 percentage",
-    #         F.round(F.col("1")/(F.col("1")+F.col("2")+F.col("3")+F.col("4")+F.col("5")+F.col("6")+F.col("7")+F.col("BOV")+F.col("BOV_AFRI"))*100, 1)
-    #     )
-    #     .groupby(
-    #         F.col("country_usual_name"),
-    #         F.col("three_letters_code"),
-    #     )
-    #     .pivot(
-    #         "RIF"
-    #     )
-    #     .agg(
-    #         F.first("L1 percentage")
-    #     )
-    # )
-
-    # output = io.BytesIO()
-    # writer = pandas.ExcelWriter(output, engine="openpyxl")
-    # drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
-    # writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
-    # samples_per_country.join(samples_per_rif_r, on=["country_usual_name", "three_letters_code"], how="left").sort("country_usual_name").toPandas().to_excel(writer, sheet_name="Samples country count", index=False)
-    # non_public_sequencing_data.toPandas().to_excel(writer, sheet_name="Non pub data", index=False)
-    # samples_per_rif_r_per_lineage.toPandas().to_excel(writer, sheet_name="Lineage_data", index=False)
-
-    # writer.save()
-    # data = output.getvalue()
-
-    # s3.Bucket('aws-glue-assets-231447170434-us-east-1').put_object(Key=args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
-
+        s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
+    except ModuleNotFoundError:
+        pass
 
     # We are done with phenotypes
     # Drop then, but keep the list of (sample, drug) that are relevant for the rest
@@ -750,7 +555,6 @@ if __name__=="__main__":
         .alias("filtered_samples")
     )
 
-
     protein_id = protein_id_view(data_frame["dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature_dbxref"]).alias("protein_id")
 
     fapg = formatted_annotation_per_gene(data_frame["varianttoannotation"], data_frame["annotation"], data_frame["dbxref"], protein_id).alias("fapg")
@@ -762,9 +566,6 @@ if __name__=="__main__":
     mnvs_miss = missense_codon_list(fapg, data_frame["variant"], data_frame["genedrugresistanceassociation"])    
 
     var_cat = tiered_drug_variant_categories(fapg, san, data_frame["genedrugresistanceassociation"], data_frame["variant"], mvd, data_frame["promoterdistance"], mnvs_miss, bool(int(args["unpool_frameshifts"])))[0].alias("variant_category")
-
-
-    # additional_variant_information = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_genphensql_additional_variant_information").alias("additional_info").where(F.col("description")=="merker_neutral_variant")
 
     gene_name = gene_or_locus_tag_view(data_frame["seqfeature_dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature"], data_frame["term"], "gene_symbol").alias("gene")
 
@@ -792,42 +593,61 @@ if __name__=="__main__":
     #     .distinct()
     # )
 
-    # v1_variant = glueContext.create_data_frame.from_catalog(database = glue_dbname, table_name = "postgres_genphensql_additional_variant_information").alias("v1_match").where(F.col("description")!="merker_neutral_variant")
+    data_frame["variantadditionalinfo"].show()
 
-    # v1_v2_matching = (
-    #     var_cat
-    #     .join(
-    #         v1_variant,
-    #         "variant_id",
-    #         "inner"
-    #     )
-    #     .join(
-    #         g_l_tag,
-    #         "gene_db_crossref_id",
-    #         "inner"
-    #     )
-    #     .select(
-    #         F.col("resolved_symbol"),
-    #         F.col("variant_category"),
-    #         F.col("predicted_effect"),
-    #         F.col("description")
-    #     )
-    #     .distinct()
-    # )
+    v1_variant = ( 
+        data_frame["variantadditionalinfo"]
+        .drop(
+            "variant_id", 
+            "id"
+        )
+        .join(
+            data_frame["variant"],
+            on=["position", "alternative_nucleotide", "reference_nucleotide"],
+            how="inner"
+        )
+    )
 
-    # glueContext.write_dynamic_frame.from_options(
-    #     frame=DynamicFrame.fromDF(
-    #         v1_v2_matching.drop("variant_id").coalesce(1),
-    #         glueContext,
-    #         "final"
-    #     ),
-    #     connection_type="s3",
-    #     format="csv",
-    #     connection_options={
-    #         "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/v1_matching/",
-    #         "partitionKeys": [],
-    #     }
-    # )
+
+    v1_variant = (
+        v1_variant
+        .join(
+            var_cat,
+            on="variant_id",
+            how="inner"
+        )
+    )
+
+    v1_variant= (
+        v1_variant
+        .join(
+            gene_locus_tag,
+            "gene_db_crossref_id",
+            "inner"
+        )
+        .select(
+            F.col("resolved_symbol"),
+            F.col("variant_category"),
+            F.col("predicted_effect"),
+            F.col("v1_annotation").alias("description")
+        )
+        .distinct()
+    )
+
+
+    glueContext.write_dynamic_frame.from_options(
+        frame=DynamicFrame.fromDF(
+            v1_variant.drop("variant_id").coalesce(1),
+            glueContext,
+            "final"
+        ),
+        connection_type="s3",
+        format="csv",
+        connection_options={
+            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/v1_matching/",
+            "partitionKeys": [],
+        }
+    )
 
     gen_cat = (
         data_frame["genotype"]
@@ -858,12 +678,7 @@ if __name__=="__main__":
     all_pos = all_positions_by_category(var_cat)
 
 
-    #neutral_variants = get_neutral_variants(filtered_samples_neutral, clean_phenotypes_neutral, variant_category, genotype, 0.1, additional_variant_information, drug, gene_name)
-
-
-    # twalker_extraction(gen_cat, all_pos, samples_without_phenotypes, lss, drug, g_l_tag, orphan=True)
-
-    twalker_extraction(
+    solo_extraction(
         gen_cat,
         all_pos,
         filt_samp_drug,
@@ -871,122 +686,6 @@ if __name__=="__main__":
         data_frame["drug"],
         gene_locus_tag,
         data_frame["genedrugresistanceassociation"],
-        bucket
+        bucket,
+        orphan = False
     )
-
-
-
-    # if args["extraction"]=="twalker":
-    # elif args["extraction"]=="farhat_lab":
-    #     all_mic_data = (
-    #         mic
-    #         .join(
-    #             drug,
-    #             "drug_id",
-    #             "inner"
-    #         )
-    #         .join(
-    #             tier,
-    #             "drug_id",
-    #             "left_semi"
-    #         )
-    #         .join(
-    #             filtered_samples,
-    #             "sample_id",
-    #             "left_semi"
-    #         )
-    #         .select(
-    #             F.col("sample_id"),
-    #             F.col("drug_name"),
-    #             F.col("plate").alias("medium"),
-    #             F.col("mic_value")
-    #         )
-    #     )
-
-    #     S3bucket_node3 = glueContext.write_dynamic_frame.from_options(
-    #         frame=DynamicFrame.fromDF(all_mic_data,
-    #             glueContext,
-    #             "final"),
-    #         connection_type="s3",
-    #         format="csv",
-    #         connection_options={
-    #             "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/mic/",
-    #             "partitionKeys": ["drug_name"],
-    #         }
-    #     )
-
-    #     snv_sites = get_snv_positions_sites(seqfeat, sdc, sqv, term, location, variant)
-
-
-    #     grm_data = (
-    #         get_sample_x_variant_data(snv_sites, filt_samp_drug.select("sample_id").distinct(), genotype, 0.01)[0]
-    #         .select(
-    #             F.col("sample_id"),
-    #             F.col("position"),
-    #             F.coalesce(F.col("alternative_nucleotide"), F.col("selected_sites.reference_nucleotide")),
-    #             F.col("dp"),
-    #         )
-    #     )
-
-    #     S3bucket_node3 = glueContext.write_dynamic_frame.from_options(
-    #         frame=DynamicFrame.fromDF(grm_data,
-    #             glueContext,
-    #             "final"),
-    #         connection_type="s3",
-    #         format="csv",
-    #         connection_options={
-    #             "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/grm/",
-    #             "partitionKeys": [],
-    #         }
-    #     )
-
-    #     pca_data = glueContext.create_dynamic_frame.from_catalog(database = glue_dbname, table_name = "postgres_genphensql_pca_dimension_results")
-
-    #     S3bucket_node3 = glueContext.write_dynamic_frame.from_options(
-    #         frame=pca_data,
-    #         connection_type="s3",
-    #         format="csv",
-    #         connection_options={
-    #             "path": "s3://aws-glue-assets-231447170434-us-east-1/"+args["JOB_NAME"]+"/"+args["extraction"].strip("").strip("/")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/pca/",
-    #             "partitionKeys": [],
-    #         }
-    #     )
-
-        # farhat_lab_extraction(gen_cat, pos, all_pos, filt_samp_drug, var_cat, lss, sample, drug, g_l_tag)
-
-    # elif args["extraction"]=="custom":
-    #     args = getResolvedOptions(sys.argv, ["reference_mutation", "gene_list", "drug_list"])
-
-    #     gene_name = args["reference_mutation"].split("_")[0].strip()
-
-
-    #     hgvs = args["reference_mutation"].split("_")[1].strip()
-
-    #     sample_ids = (
-    #         gen_cat
-    #         .join(
-    #             g_l_tag.where(F.col("resolved_symbol")==gene_name),
-    #             on="gene_db_crossref_id",
-    #             how="inner"
-    #         )
-    #         .where(
-    #             F.col("variant_category")==hgvs
-    #         )
-    #         .select("sample_id")
-    #         .distinct()
-    #     )
-
-
-    # s3 = boto3.client("s3")
-
-    # files = s3.list_objects_v2(
-    #     Bucket="aws-glue-assets-231447170434-us-east-1",
-    #     Prefix=args["JOB_NAME"]+"/"+args["extraction"].strip("/").strip("")+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]
-    # )
-
-    # for file in files["Contents"]:
-    #     s3.copy(
-    #         CopySource={"Bucket":"aws-glue-assets-231447170434-us-east-1", "Key":file["Key"]},
-    #         Bucket="aws-glue-assets-231447170434-us-east-1",
-    #         Key=file["Key"].replace("extraction_currently_running", "extraction_successful")
-    #     )
