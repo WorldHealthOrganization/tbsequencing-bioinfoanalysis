@@ -402,6 +402,7 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
                 ).alias("value")
             )
         )
+    
     binarized_plates = (
         minimum_inhibitory_concentration
         .join(
@@ -473,10 +474,12 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
                 F.col("plate"),
                 F.col("mic_value"),
                 F.col("test_result"),
-                F.when(F.col("mic.plate")=="MYCOTB", F.lit("MYCOTB_MIC"))
+                F.when(
+                    F.col("mic.plate")=="MYCOTB", F.lit("MYCOTB_MIC"))
                     .when(F.col("mic.plate").isin("UKMYC5", "UKMYC6"), F.lit("CRyPTIC_MIC"))
                     .when((F.col("drug_name")=="Pretomanid") & (F.col("mic.plate")=="MGIT"), F.lit("WHO_current"))
-                    .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result"))).alias("phenotypic_category"),
+                    .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result")))
+                .alias("phenotypic_category"),
         )
     )
     return(binarized_plates.alias(""))
