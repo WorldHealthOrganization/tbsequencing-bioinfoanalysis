@@ -531,7 +531,7 @@ if __name__=="__main__":
         output = io.BytesIO()
         writer = pandas.ExcelWriter(output, engine="openpyxl")
         drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
-        # writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
+        writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
         # samples_per_country.join(samples_per_rif_r, on=["country_usual_name", "three_letters_code"], how="left").sort("country_usual_name").toPandas().to_excel(writer, sheet_name="Samples country count", index=False)
         # non_public_sequencing_data.toPandas().to_excel(writer, sheet_name="Non pub data", index=False)
         # samples_per_rif_r_per_lineage.toPandas().to_excel(writer, sheet_name="Lineage_data", index=False)
