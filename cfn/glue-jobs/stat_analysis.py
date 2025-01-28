@@ -240,7 +240,8 @@ if __name__=="__main__":
                     "varianttoannotation",
                     "promoterdistance",
                     "variant",
-                    "variantadditionalinfo"
+                    "variantadditionalinfo",
+                    "country"
                     ],
                 "submission" : [
                     "pdstest",
@@ -525,13 +526,34 @@ if __name__=="__main__":
         )
     )
 
+    samples_per_country = (
+        filtered_samples_drug_phenotypes_box
+        .join(
+            data_frame["sample"].alias("sample"),
+            on="sample_id",
+            how="inner",
+        )
+        .join(
+            data_frame["country"].alias("country"),
+            F.col("sample.country_id")==F.col("country.three_letters_code"),
+            how="left"
+        )
+        .groupby(
+            F.col("country_usual_name"),
+            F.col("three_letters_code"),
+        )
+        .agg(
+            F.countDistinct("sample_id").alias("total")
+        )
+    )
+
     s3 = boto3.resource("s3")
     try:
 
         output = io.BytesIO()
         writer = pandas.ExcelWriter(output, engine="openpyxl")
         drug_sample_overview.toPandas().to_excel(writer, sheet_name="Drug Sample Category count", index=False)
-        # writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
+        writer.sheets["Drug Sample Category count"].auto_filter.ref = "A1:D1"
         # samples_per_country.join(samples_per_rif_r, on=["country_usual_name", "three_letters_code"], how="left").sort("country_usual_name").toPandas().to_excel(writer, sheet_name="Samples country count", index=False)
         # non_public_sequencing_data.toPandas().to_excel(writer, sheet_name="Non pub data", index=False)
         # samples_per_rif_r_per_lineage.toPandas().to_excel(writer, sheet_name="Lineage_data", index=False)
