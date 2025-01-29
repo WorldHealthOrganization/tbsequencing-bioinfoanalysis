@@ -226,7 +226,14 @@ if __name__=="__main__":
 
     data_frame = {}
     tables = { 
-            "biosql": ["dbxref", "seqfeature_qualifier_value", "seqfeature_dbxref", "location", "seqfeature", "term"],
+            "biosql": [
+                "dbxref",
+                "seqfeature_qualifier_value",
+                "seqfeature_dbxref",
+                "location",
+                "seqfeature",
+                "term"
+            ],
             "public": {
                 "genphen":  [
                     "pdstestcategory",
