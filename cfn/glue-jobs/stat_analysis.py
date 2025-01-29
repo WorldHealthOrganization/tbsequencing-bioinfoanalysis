@@ -240,7 +240,8 @@ if __name__=="__main__":
                     "varianttoannotation",
                     "promoterdistance",
                     "variant",
-                    "variantadditionalinfo"
+                    "variantadditionalinfo",
+                    "country"
                     ],
                 "submission" : [
                     "pdstest",
@@ -525,6 +526,29 @@ if __name__=="__main__":
         )
     )
 
+    samples_per_country = (
+        filtered_samples_drug_phenotypes_box
+        .join(
+            data_frame["sample"].alias("sample"),
+            on="sample_id",
+            how="inner",
+        )
+        .join(
+            data_frame["country"].alias("country"),
+            F.col("sample.country_id")==F.col("country.three_letters_code"),
+            how="left"
+        )
+        .groupby(
+            F.col("country_usual_name"),
+            F.col("three_letters_code"),
+        )
+        .agg(
+            F.countDistinct("sample_id").alias("total")
+        )
+    )
+
+
+
     s3 = boto3.resource("s3")
     try:
 
@@ -535,13 +559,15 @@ if __name__=="__main__":
         # samples_per_country.join(samples_per_rif_r, on=["country_usual_name", "three_letters_code"], how="left").sort("country_usual_name").toPandas().to_excel(writer, sheet_name="Samples country count", index=False)
         # non_public_sequencing_data.toPandas().to_excel(writer, sheet_name="Non pub data", index=False)
         # samples_per_rif_r_per_lineage.toPandas().to_excel(writer, sheet_name="Lineage_data", index=False)
-
         writer.save()
         data = output.getvalue()
 
         s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
     except ModuleNotFoundError:
-        pass
+        csv_buffer = io.BytesIO()
+        samples_per_country.toPandas().to_csv(csv_buffer, index=False)
+        s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
+
 
     # We are done with phenotypes
     # Drop then, but keep the list of (sample, drug) that are relevant for the rest
