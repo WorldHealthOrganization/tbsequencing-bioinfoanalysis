@@ -259,7 +259,6 @@ if __name__=="__main__":
         if isinstance(tables[schema], list):
             for table in tables[schema]:
                 tname = dbname + "_biosql_" + table
-                print(tname)
                 data_frame[table] = glueContext.create_data_frame.from_catalog(
                     database = glue_dbname,
                     table_name = tname
@@ -268,7 +267,6 @@ if __name__=="__main__":
             for app in tables[schema].keys():
                 for table in tables[schema][app]:
                     tname = dbname + "_" + schema + "_" + app + "_" + table
-                    print(tname)
                     data_frame[table] = glueContext.create_data_frame.from_catalog(
                         database = glue_dbname,
                         table_name = tname
@@ -282,6 +280,17 @@ if __name__=="__main__":
         .withColumnRenamed(
             "range",
             "mic_value"
+        )
+        .where(
+            F.col("staging")==False
+        )
+    )
+
+    data_frame["pdstest"] = (
+        data_frame["mictest"]
+        .alias("pdst")
+        .where(
+            F.col("staging")==False
         )
     )
 
@@ -566,7 +575,7 @@ if __name__=="__main__":
     except ModuleNotFoundError:
         csv_buffer = io.BytesIO()
         samples_per_country.toPandas().to_csv(csv_buffer, index=False)
-        s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
+        s3.Object(bucket, args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
 
 
     # We are done with phenotypes
