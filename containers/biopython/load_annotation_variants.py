@@ -40,16 +40,32 @@ def main(arguments):
     # SnpEff mishandles MNV that could be related to "Stop_retained_variant"
     # We have to fix that in various steps
 
+    
+
+    
     # Fix stop retained variant that are in fact early stop codon
     # Update 2024-05: This regexp used to match p.Ter\d+Ter...
     # It has been fixed so that stop retained variant are not modified to stop gained
-    regexp_missense_ter = r'^(?!p\.Ter[0-9]+Ter)p\.[A-Z][a-z]{2}([0-9]+)Ter$'
+    # Update 2025-01: This fix was awful and made things worse
+    # stop_retained_variant where wrongly set to stop_gained because of faulty regexp
+    # Missense regexp was too general and matched also stop_retained_variant !
+
+    # Regexps that matches incorrect annotation where stop retained variant are in fact missense
+    regexp_missense_ter = r"^(?!p\.Ter[0-9]+Ter)p\.[A-Z][a-z]{2}([0-9]+)Ter$"
+
+
+    # We define a constrained regexp that matches missenses and not ter synonymous (=stop retained variant)
+    regexp_missense_not_stop_synonymous = r'^(?!p\.Ter[0-9]+Ter)p\.[A-Z][a-z]{2}([0-9]+)[A-Z][a-z]{2}$'
+
+    # Stop retained variant regexp
+
+    regexp_stop_synonymous = r"^p\.Ter[0-9]+Ter$"
+
     annotation.loc[(annotation["HGVS.p"].str.match(regexp_missense_ter)) & (annotation["Annotation"]=="stop_retained_variant"), "Annotation"] = "stop_gained"
     annotation.loc[annotation["HGVS.p"].str.match(regexp_missense_ter) & (annotation["Annotation"]=="stop_gained"), "HGVS.p"] = annotation.loc[annotation["HGVS.p"].str.match(regexp_missense_ter) & (annotation["Annotation"]=="stop_gained"), "HGVS.p"].str.replace(r"Ter$", "*", regex=True) 
 
-    # Fix stop retained variant that are missense
-    regexp_missense = r'^p\.[A-Z][a-z]{2}([0-9]+)[A-Z][a-z]{2}$'
-    annotation.loc[annotation["HGVS.p"].str.match(regexp_missense) & (annotation["Annotation"]=="stop_retained_variant"), "Annotation"] = "missense_variant"
+    # Fix stop retained variant that are in fact missense
+    annotation.loc[annotation["HGVS.p"].str.match(regexp_missense_not_stop_synonymous) & (annotation["Annotation"]=="stop_retained_variant"), "Annotation"] = "missense_variant"
     
     #Normalization of the table happening here:
     #Flattening of all annotations, nucleotidic (eg c.609G>A) and proteic (eg p.Ser315Thr)
@@ -114,11 +130,11 @@ def main(arguments):
         #Sometimes Dist and the number in the HGVS nomenclature are not equal, when the first change is missense...
         #So let's use the HGVS nomenclature value instead 
         multiple_missense_mutants["Dist"] = multiple_missense_mutants["Value"].str.extract("([0-9]+)").astype(int)
-        multiple_missense_mutants["Dist"] = multiple_missense_mutants["Dist"]  +  multiple_missense_mutants["Order"].astype(int)
+        multiple_missense_mutants["Dist"] = multiple_missense_mutants["Dist"] + multiple_missense_mutants["Order"].astype(int)
         multiple_missense_mutants["Value"] = "p." + multiple_missense_mutants["Ref"] + multiple_missense_mutants["Dist"].astype(str) +  multiple_missense_mutants["Alt"].str.replace("Ter", "*", regex=False)
 
         multiple_missense_mutants.loc[multiple_missense_mutants["Value"].str.match(regexp_stop_gained), "Annotation"] = "stop_gained"
-        multiple_missense_mutants.loc[multiple_missense_mutants["Value"].str.match(regexp_missense), "Annotation"] = "missense_variant"
+        multiple_missense_mutants.loc[multiple_missense_mutants["Value"].str.match(regexp_missense_not_stop_synonymous), "Annotation"] = "missense_variant"
         multiple_missense_mutants.loc[multiple_missense_mutants["Value"].str.match(regexp_ter_missense), "Annotation"] = "stop_lost"
 
         annotation = pandas.concat([annotation[["VariantId", "Annotation", "GeneId", "Dist", "level_6", "Value"]], multiple_missense_mutants[["VariantId", "Annotation", "GeneId", "Dist", "level_6", "Value"]]])
@@ -126,7 +142,7 @@ def main(arguments):
     #For contiguous synonymous + missense mutation, the position of the first codon is reported, instead of the position of the missense codon.
     #We replace those instances with the correct values
     
-    annotation.loc[annotation["Value"].str.match(regexp_missense), "Dist"] = annotation["Value"].str.extract(regexp_missense, expand=False).dropna()
+    annotation.loc[annotation["Value"].str.match(regexp_missense_not_stop_synonymous), "Dist"] = annotation["Value"].str.extract(regexp_missense_not_stop_synonymous, expand=False).dropna()
 
     annotation[["VariantId", "Annotation", "GeneId", "Dist", "level_6", "Value"]].to_csv("annotation_normalized.tsv", header=False, sep="\t", index=False)
 
