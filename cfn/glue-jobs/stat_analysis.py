@@ -121,7 +121,7 @@ def solo_extraction(genotype_categorized, position, filtered_sample_drug, loc_se
             connection_type="s3",
             format="csv",
             connection_options={
-                "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/missing_sample_drug_tier/",
+                "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/missing_sample_drug_tier/",
                 "partitionKeys": ["drug_name", "tier"]
             }
         )
@@ -201,7 +201,7 @@ def solo_extraction(genotype_categorized, position, filtered_sample_drug, loc_se
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/"+output_folder+"/",
+            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/"+output_folder+"/",
             "partitionKeys": partition
         }
     )
@@ -241,7 +241,8 @@ if __name__=="__main__":
                     "promoterdistance",
                     "variant",
                     "variantadditionalinfo",
-                    "country"
+                    "country",
+                    "variantgrade"
                     ],
                 "submission" : [
                     "pdstest",
@@ -287,7 +288,7 @@ if __name__=="__main__":
     )
 
     data_frame["pdstest"] = (
-        data_frame["mictest"]
+        data_frame["pdstest"]
         .alias("pdst")
         .where(
             F.col("staging")==False
@@ -439,7 +440,7 @@ if __name__=="__main__":
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/phenotypes/",
+            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/phenotypes/",
             "partitionKeys": ["drug_name"],
         }
     )
@@ -571,11 +572,11 @@ if __name__=="__main__":
         writer.save()
         data = output.getvalue()
 
-        s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
+        s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/drug_sample_category_count.xlsx", Body=data)
     except ModuleNotFoundError:
         csv_buffer = io.BytesIO()
         samples_per_country.toPandas().to_csv(csv_buffer, index=False)
-        s3.Object(bucket, args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
+        s3.Object(bucket, args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/variant_mapping.csv").put(Body=csv_buffer.getvalue())
 
 
     # We are done with phenotypes
@@ -679,7 +680,57 @@ if __name__=="__main__":
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/extraction_currently_running/"+d+"_"+args["JOB_RUN_ID"]+"/v1_matching/",
+            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/v1_matching/",
+            "partitionKeys": [],
+        }
+    )
+
+    v2_grading_matching = (
+        data_frame["variantgrade"]
+        .where(
+            F.col("grade_version")==2
+        )
+        .join(
+            var_cat
+            .select(
+                F.col("variant_id"),
+                F.col("gene_db_crossref_id"),
+                F.col("variant_category"),
+            ),
+            on="variant_id",
+            how="inner"
+        )
+        .join(
+            data_frame["drug"],
+            on="drug_id",
+            how="inner"
+        )
+        .join(
+            gene_locus_tag,
+            on="gene_db_crossref_id",
+            how="inner"
+        )
+        .select(
+            F.concat_ws(
+                "_",
+                F.col("resolved_symbol"),
+                F.col("variant_category"),
+            ).alias("variant"),
+            F.col("drug_name"),
+            F.col("grade")
+        )
+    )
+
+    glueContext.write_dynamic_frame.from_options(
+        frame=DynamicFrame.fromDF(
+            v2_grading_matching.drop("variant_id").coalesce(1),
+            glueContext,
+            "final"
+        ),
+        connection_type="s3",
+        format="csv",
+        connection_options={
+            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/v2_grades/",
             "partitionKeys": [],
         }
     )
