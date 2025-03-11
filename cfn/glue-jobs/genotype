@@ -95,11 +95,12 @@ contaminated = (
 print(contaminated.count())
 
 datasource0 = (
-    glueContext.create_data_frame.from_catalog(
+    glueContext.create_dynamic_frame.from_catalog(
         database = args["glue_db_name"],
         table_name = "genotype",
         transformation_ctx = "datasource0"
     )
+    .toDF()
     .join(
         data_frame["sample"],
         on="sample_id",
