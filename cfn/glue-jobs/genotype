@@ -27,7 +27,6 @@ job.init(args['JOB_NAME'], args)
 dbname = args["postgres_db_name"]
 glue_dbname = args["glue_db_name"]
 
-
 data_frame = {}
 tables = { 
         "public": {
@@ -61,9 +60,7 @@ for schema in tables.keys():
 # Adding extra safeguard
 # Filter sample ids that have been correctly processed
 # bioanalysis_status = 'Uploaded to S3'
-
-
-data_frame["sample"] = (
+samples = (
     data_frame["sample"]
     .where(
         F.col("bioanalysis_status")=="Uploaded to S3"
@@ -82,10 +79,10 @@ contaminated = (
         how="inner"
     )
     .where(
-        F.col("ncbi_taxon_id")==1773
-        & F.col("value")<1
-        & F.col("percentage_of_properly_paired_reads")<20
-        & F.col("median_depth")<10
+        (F.col("ncbi_taxon_id")==1773)
+        & (F.col("value")<1)
+        & (F.col("percentage_of_properly_paired_reads")<20)
+        & (F.col("median_depth")<10)
     )
     .select(
         F.col("sample_id")
@@ -102,7 +99,7 @@ datasource0 = (
     )
     .toDF()
     .join(
-        data_frame["sample"],
+        samples,
         on="sample_id",
         how="inner"
     )
