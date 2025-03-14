@@ -7,7 +7,7 @@ from Bio import SeqIO
 
 
 def return_genome_zip(genome_accession_id):
-    req = requests.get("https://api.ncbi.nlm.nih.gov/datasets/v1/genome/accession/"+genome_accession_id+"/download?exclude_sequence=false&include_annotation_type=GENOME_GFF&hydrated=FULLY_HYDRATED", stream=True)
+    req = requests.get("https://api.ncbi.nlm.nih.gov/datasets/v2/genome/accession/"+genome_accession_id+"/download?exclude_sequence=false&include_annotation_type=GENOME_GFF,GENOME_FASTA&hydrated=FULLY_HYDRATED", stream=True)
     return(zipfile.ZipFile(io.BytesIO(req.content)))
 
 def extract_file_from_zip_object(zip_object, genome_accession_id, file_id):
