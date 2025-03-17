@@ -229,7 +229,7 @@
                 "StateMachineArn": "${WorkflowPrepareReferencesArn}",
                 "Input.$": "$"
             },
-            "Next": "VariantCalling (1)",
+            "Next": "TaxonomyAnalysis",
             "Catch": [
                 {
                     "ErrorEquals": [
@@ -240,7 +240,7 @@
                 }
             ]
         },
-        "VariantCalling (1)": {
+        "TaxonomyAnalysis": {
             "Type": "Map",
             "MaxConcurrencyPath": "$.Concurrency",
             "ResultPath": null,
@@ -264,9 +264,9 @@
                     "Mode": "DISTRIBUTED",
                     "ExecutionType": "STANDARD"
                 },
-                "StartAt": "VariantCallingExecution (1)",
+                "StartAt": "SampleTaxonomyAnalysis",
                 "States": {
-                    "VariantCallingExecution (1)": {
+                    "SampleTaxonomyAnalysis": {
                         "Type": "Task",
                         "Resource": "arn:aws:states:::states:startExecution.sync",
                         "ResultPath": null,
@@ -283,17 +283,81 @@
                             },
                             "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
                         },
-                        "Next": "OverrideVariantCallingResult (1)",
+                        "Next": "OverrideSampleTaxonomyAnalysis",
                         "Catch": [
                             {
                                 "ErrorEquals": [
                                     "States.ALL"
                                 ],
-                                "Next": "OverrideVariantCallingResult (1)"
+                                "Next": "OverrideSampleTaxonomyAnalysis"
                             }
                         ]
                     },
-                    "OverrideVariantCallingResult (1)": {
+                    "OverrideSampleTaxonomyAnalysis": {
+                        "Type": "Pass",
+                        "Parameters": null,
+                        "OutputPath": null,
+                        "ResultPath": "$",
+                        "End": true
+                    }
+                }
+            },
+            "Next": "VariantAnalysis"
+        },
+        "VariantAnalysis": {
+            "Type": "Map",
+            "MaxConcurrencyPath": "$.Concurrency",
+            "ResultPath": null,
+            "ToleratedFailurePercentage": 100,
+            "ItemsPath": "$.Samples.List.Ids",
+            "Parameters": {
+                "SampleId.$": "$$.Map.Item.Value",
+                "JobQueueArn.$": "$.JobQueueArn",
+                "DbConnection.$": "$.DbConnection",
+                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                "AssemblyName.$": "$.AssemblyName",
+                "NucleotideAccession.$": "$.NucleotideAccession",
+                "KrakenDbName.$": "$.KrakenDbName",
+                "FSxId.$": "$.FSxId",
+                "LaunchTemplateId.$": "$.LaunchTemplateId",
+                "ComputeEnvArn.$": "$.ComputeEnvArn",
+                "OutputBucket.$": "$.OutputBucket"
+            },
+            "ItemProcessor": {
+                "ProcessorConfig": {
+                    "Mode": "DISTRIBUTED",
+                    "ExecutionType": "STANDARD"
+                },
+                "StartAt": "SampleVariantAnalysis",
+                "States": {
+                    "SampleVariantAnalysis": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::states:startExecution.sync",
+                        "ResultPath": null,
+                        "Parameters": {
+                            "StateMachineArn": "${WorkflowVariantCallingArn}",
+                            "Input": {
+                                "SampleId.$": "$.SampleId",
+                                "JobQueueArn.$": "$.JobQueueArn",
+                                "DbConnection.$": "$.DbConnection",
+                                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
+                                "AssemblyName.$": "$.AssemblyName",
+                                "NucleotideAccession.$": "$.NucleotideAccession",
+                                "KrakenDbName.$": "$.KrakenDbName"
+                            },
+                            "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
+                        },
+                        "Next": "OverrideSampleVariantAnalysis",
+                        "Catch": [
+                            {
+                                "ErrorEquals": [
+                                    "States.ALL"
+                                ],
+                                "Next": "OverrideSampleVariantAnalysis"
+                            }
+                        ]
+                    },
+                    "OverrideSampleVariantAnalysis": {
                         "Type": "Pass",
                         "Parameters": null,
                         "OutputPath": null,
