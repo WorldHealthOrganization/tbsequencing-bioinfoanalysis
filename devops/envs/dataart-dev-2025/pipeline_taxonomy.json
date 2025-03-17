@@ -6,7 +6,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${getSampleName}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -42,7 +42,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${getLibraryIdsForSample}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -78,7 +78,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${getLibraryCountForSample}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -451,25 +451,10 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "PrepParams",
+                    "Next": "WaitThirtySeconds",
                     "ResultPath": null
                 }
             ]
-        },
-        "PrepParams": {
-            "Type": "Pass",
-            "Parameters": {
-                "SampleId.$": "$.SampleId.Value",
-                "JobQueueArn.$": "$.JobQueueArn",
-                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                "AssemblyName.$": "$.AssemblyName",
-                "DbConnection.$": "$.DbConnection",
-                "ReferenceName.$": "States.Format('{}_{}', $.RefseqAssemblyAccession, $.AssemblyName)",
-                "NucleotideAccession.$": "$.NucleotideAccession",
-                "KrakenDbName.$": "$.KrakenDbName"
-            },
-            "ResultPath": "$",
-            "Next": "WaitThirtySeconds"
         },
         "WaitThirtySeconds": {
             "Type": "Wait",
@@ -526,12 +511,12 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${UpdateStatus}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "UPDATE submission_sample\n SET    bioanalysis_status = %s, bioanalysis_status_changed_at=now() \n WHERE  id = %s;",
-                    "QueryParams.$": "States.Array($.AnalysisStatus.Value, $.SampleId)"
+                    "QueryParams.$": "States.Array($.AnalysisStatus.Value, $.SampleId.Value)"
                 }
             },
             "ResultPath": null,
