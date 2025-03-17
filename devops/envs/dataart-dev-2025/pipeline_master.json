@@ -135,7 +135,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${PrepareSamples}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -149,7 +149,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${GetSamples}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -271,7 +271,7 @@
                         "Resource": "arn:aws:states:::states:startExecution.sync",
                         "ResultPath": null,
                         "Parameters": {
-                            "StateMachineArn": "${WorkflowVariantCallingArn}",
+                            "StateMachineArn": "${WorkflowTaxonomyArn}",
                             "Input": {
                                 "SampleId.$": "$.SampleId",
                                 "JobQueueArn.$": "$.JobQueueArn",
@@ -442,7 +442,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${UpdateStatus}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -457,7 +457,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${UpdateStatus}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
