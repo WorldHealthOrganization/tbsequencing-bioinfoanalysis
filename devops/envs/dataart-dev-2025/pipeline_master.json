@@ -155,7 +155,7 @@
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "SELECT DISTINCT id FROM submission_sample WHERE bioanalysis_status = 'Unprocessed' LIMIT(5000);"
+                    "Query": "WITH unpro AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Unprocessed' LIMIT(5000)) SELECT '{\"Ids\":['||string_agg(unpro.sampleid::text, ',')||']}' FROM unpro;"
                 }
             },
             "ResultPath": "$.Samples",
@@ -168,29 +168,28 @@
             "Type": "Choice",
             "Choices": [
                 {
-                    "Variable": "$.Samples.Value[0]",
-                    "IsPresent": false,
+                    "Variable": "$.Samples.Value[0][0]",
+                    "IsNull": true,
                     "Next": "NoSampleToProcess"
                 }
             ],
-            "Default": "CreateResources"
+            "Default": "formatSampleArray"
         },
-        "CreateResources": {
+        "formatSampleArray": {
+            "Type": "Pass",
+            "Next": "createResources",
+            "Parameters": {
+                "List.$": "States.StringToJson($.Samples.Value[0][0])"
+            },
+            "ResultPath": "$.Samples"
+        },
+        "createResources": {
             "Type": "Task",
             "Resource": "arn:aws:states:::states:startExecution.sync",
-            "ResultPath": null,
+            "ResultPath": "$.Resources",
             "Parameters": {
                 "StateMachineArn": "${WorkflowFSxResourcesCreationArn}",
-                "Input": {
-                    "SampleId.$": "$.SampleId",
-                    "JobQueueArn.$": "$.JobQueueArn",
-                    "DbConnection.$": "$.DbConnection",
-                    "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                    "AssemblyName.$": "$.AssemblyName",
-                    "NucleotideAccession.$": "$.NucleotideAccession",
-                    "KrakenDbName.$": "$.KrakenDbName"
-                },
-                "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
+                "Input.$": "$"
             },
             "Next": "passOutputValues",
             "Catch": [
@@ -200,24 +199,26 @@
                     ],
                     "Next": "FailEnd"
                 }
-            ]
+            ],
+            "ResultSelector": {
+                "List.$": "States.StringToJson($.Output)"
+            }
         },
         "passOutputValues": {
             "Type": "Pass",
             "Next": "DownloadReferences",
             "Parameters": {
-                "JobQueueArn.$": "$.JobQueue.Arn",
+                "JobQueueArn.$": "$.Resources.List.JobQueueArn",
+                "FSxId.$": "$.Resources.List.FSxId",
+                "LaunchTemplateId.$": "$.Resources.List.LaunchTemplateId",
+                "ComputeEnvArn.$": "$.Resources.List.ComputeEnvArn",
                 "RDSQuery.$": "$.RDSQuery",
-                "ComputeEnvArn.$": "$.ComputeEnvironment.Arn",
-                "FSxName.$": "$.FSx.Name",
                 "OutputBucket": "${OutputBucket}",
                 "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
                 "DbConnection.$": "$.DbConnection",
                 "AssemblyName.$": "$.AssemblyName",
                 "NucleotideAccession.$": "$.NucleotideAccession",
                 "KrakenDbName.$": "$.KrakenDbName",
-                "FSxId.$": "$.FSx.Name",
-                "LaunchTemplateId.$": "$.LaunchTemplate.Id",
                 "Samples.$": "$.Samples",
                 "Concurrency.$": "$.Concurrency"
             }
@@ -227,83 +228,18 @@
             "Resource": "arn:aws:states:::states:startExecution.sync",
             "ResultPath": null,
             "Parameters": {
-                "StateMachineArn": "${WorkflowDownloadReferences}",
-                "Input": {
-                    "SampleId.$": "$.SampleId",
-                    "JobQueueArn.$": "$.JobQueueArn",
-                    "DbConnection.$": "$.DbConnection",
-                    "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                    "AssemblyName.$": "$.AssemblyName",
-                    "NucleotideAccession.$": "$.NucleotideAccession",
-                    "KrakenDbName.$": "$.KrakenDbName"
-                },
-                "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
+                "StateMachineArn": "${WorkflowPrepareReferencesArn}",
+                "Input.$": "$"
             },
-            "Next": "VariantCalling",
+            "Next": "VariantCalling (1)",
             "Catch": [
                 {
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "FailEnd"
+                    "Next": "DeleteResources"
                 }
             ]
-        },
-        "VariantCalling": {
-            "Type": "Map",
-            "MaxConcurrencyPath": "$.Concurrency",
-            "ResultPath": null,
-            "ToleratedFailurePercentage": 100,
-            "ItemsPath": "$.Samples.Value",
-            "Parameters": {
-                "SampleId.$": "$$.Map.Item.Value[0]",
-                "JobQueueArn.$": "$.JobQueueArn",
-                "DbConnection.$": "$.DbConnection",
-                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                "AssemblyName.$": "$.AssemblyName",
-                "NucleotideAccession.$": "$.NucleotideAccession",
-                "KrakenDbName.$": "$.KrakenDbName",
-                "FSxId.$": "$.FSxId",
-                "LaunchTemplateId.$": "$.LaunchTemplateId",
-                "ComputeEnvArn.$": "$.ComputeEnvArn",
-                "OutputBucket.$": "$.OutputBucket"
-            },
-            "ItemProcessor": {
-                "ProcessorConfig": {
-                    "Mode": "DISTRIBUTED",
-                    "ExecutionType": "STANDARD"
-                },
-                "StartAt": "VariantCallingExecution (2)",
-                "States": {
-                    "VariantCallingExecution (2)": {
-                        "Type": "Task",
-                        "Resource": "arn:aws:states:::states:startExecution.sync",
-                        "ResultPath": null,
-                        "Parameters": {
-                            "StateMachineArn": "${WorkflowVariantCallingArn}",
-                            "Input": {
-                                "SampleId.$": "$.SampleId",
-                                "JobQueueArn.$": "$.JobQueueArn",
-                                "DbConnection.$": "$.DbConnection",
-                                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                                "AssemblyName.$": "$.AssemblyName",
-                                "NucleotideAccession.$": "$.NucleotideAccession",
-                                "KrakenDbName.$": "$.KrakenDbName"
-                            },
-                            "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
-                        },
-                        "Next": "OverrideVariantCallingResult"
-                    },
-                    "OverrideVariantCallingResult": {
-                        "Type": "Pass",
-                        "Parameters": null,
-                        "OutputPath": null,
-                        "ResultPath": "$",
-                        "End": true
-                    }
-                }
-            },
-            "Next": "VariantCalling (1)"
         },
         "VariantCalling (1)": {
             "Type": "Map",
@@ -348,7 +284,15 @@
                             },
                             "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
                         },
-                        "Next": "OverrideVariantCallingResult (1)"
+                        "Next": "OverrideVariantCallingResult (1)",
+                        "Catch": [
+                            {
+                                "ErrorEquals": [
+                                    "States.ALL"
+                                ],
+                                "Next": "OverrideVariantCallingResult (1)"
+                            }
+                        ]
                     },
                     "OverrideVariantCallingResult (1)": {
                         "Type": "Pass",
@@ -378,14 +322,14 @@
                     "Next": "DeleteResources"
                 }
             ],
-            "Default": "FlattenSamplesIds"
+            "Default": "UploadToS3"
         },
         "DeleteResources": {
             "Type": "Task",
             "Resource": "arn:aws:states:::states:startExecution.sync",
             "ResultPath": null,
             "Parameters": {
-                "StateMachineArn": "${WorkflowFSxResourcesCreationArn}",
+                "StateMachineArn": "${WorkflowFSxResourcesDeletionArn}",
                 "Input": {
                     "SampleId.$": "$.SampleId",
                     "JobQueueArn.$": "$.JobQueueArn",
@@ -407,29 +351,6 @@
                 }
             ]
         },
-        "FlattenSamplesIds": {
-            "Type": "Map",
-            "ItemsPath": "$.Samples.Value",
-            "Parameters": {
-                "SampleId.$": "$$.Map.Item.Value[0]"
-            },
-            "MaxConcurrency": 0,
-            "Iterator": {
-                "StartAt": "FlattenItem",
-                "States": {
-                    "FlattenItem": {
-                        "Type": "Pass",
-                        "Parameters": {
-                            "res.$": "$.SampleId"
-                        },
-                        "OutputPath": "$.res",
-                        "End": true
-                    }
-                }
-            },
-            "ResultPath": "$.FlattenedSamples",
-            "Next": "UploadToS3"
-        },
         "UploadToS3": {
             "Type": "Task",
             "Resource": "arn:aws:states:::batch:submitJob.sync",
@@ -450,14 +371,6 @@
                 }
             },
             "Catch": [
-                {
-                    "ErrorEquals": [
-                        "States.DataLimitExceeded",
-                        "States.Runtime"
-                    ],
-                    "ResultPath": "$.error",
-                    "Next": "UpdateStatusFailed"
-                },
                 {
                     "ErrorEquals": [
                         "States.ALL"
@@ -496,14 +409,14 @@
                 }
             },
             "ResultPath": null,
-            "Next": "DeleteResources"
+            "Next": "FailEnd"
         },
         "ChoiceExtractionStatus": {
             "Type": "Choice",
             "Choices": [
                 {
-                    "Variable": "$.ExtractionStatus.Value",
-                    "StringEquals": "Failed",
+                    "Variable": "$.ExtractionStatus",
+                    "IsPresent": false,
                     "Next": "FailEnd"
                 }
             ],
