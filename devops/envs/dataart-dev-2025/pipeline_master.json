@@ -72,9 +72,7 @@
             "Default": "PrepareStateMachinesArns"
         },
         "FailEnd": {
-            "Type": "Fail",
-            "Error": "ConcurrencyProtectionTriggered",
-            "Cause": "Another instance is running in parallel, skipping this one"
+            "Type": "Fail"
         },
         "PrepareStateMachinesArns": {
             "Type": "Pass",
@@ -155,7 +153,7 @@
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "WITH unpro AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Unprocessed' LIMIT(5000)) SELECT '{\"Ids\":['||string_agg(unpro.sampleid::text, ',')||']}' FROM unpro;"
+                    "Query": "WITH unpro AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Unprocessed' LIMIT(40)) SELECT '{\"Ids\":['||string_agg(unpro.sampleid::text, ',')||']}' FROM unpro;"
                 }
             },
             "ResultPath": "$.Samples",
@@ -237,6 +235,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
+                    "ResultPath": "$.Error",
                     "Next": "DeleteResources"
                 }
             ]
@@ -246,9 +245,9 @@
             "MaxConcurrencyPath": "$.Concurrency",
             "ResultPath": null,
             "ToleratedFailurePercentage": 100,
-            "ItemsPath": "$.Samples.Value",
+            "ItemsPath": "$.Samples.List.Ids",
             "Parameters": {
-                "SampleId.$": "$$.Map.Item.Value[0]",
+                "SampleId.$": "$$.Map.Item.Value",
                 "JobQueueArn.$": "$.JobQueueArn",
                 "DbConnection.$": "$.DbConnection",
                 "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
@@ -331,15 +330,8 @@
             "Parameters": {
                 "StateMachineArn": "${WorkflowFSxResourcesDeletionArn}",
                 "Input": {
-                    "SampleId.$": "$.SampleId",
-                    "JobQueueArn.$": "$.JobQueueArn",
-                    "DbConnection.$": "$.DbConnection",
-                    "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                    "AssemblyName.$": "$.AssemblyName",
-                    "NucleotideAccession.$": "$.NucleotideAccession",
-                    "KrakenDbName.$": "$.KrakenDbName"
-                },
-                "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
+                    "FSxId.$": "$.FSxId"
+                }
             },
             "Next": "ChoiceExtractionStatus",
             "Catch": [
@@ -347,6 +339,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
+                    "ResultPath": "$.Error",
                     "Next": "FailEnd"
                 }
             ]
