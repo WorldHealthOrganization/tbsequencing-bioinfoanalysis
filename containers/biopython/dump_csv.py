@@ -2,8 +2,15 @@ import argparse, psycopg2, boto3, os, pandas
 
 
 RAW_QUERY = """
+WITH RankedAliases AS (
+    SELECT
+        sample_id,
+        name,
+        ROW_NUMBER() OVER (PARTITION BY sample_id ORDER BY id) as rn
+    FROM submission_samplealias
+)
 SELECT
-    "submission_samplealias"."name" as "sample_alias_name",
+    ra.name as "sample_aliases_name",
     "genphen_drug"."drug_name",
     "submission_genotyperesistance"."resistance_flag",
     "submission_genotyperesistance"."variant"
@@ -14,7 +21,7 @@ INNER JOIN
 INNER JOIN
     "genphen_drug" ON ("submission_genotyperesistance"."drug_id" = "genphen_drug"."drug_id")
 LEFT JOIN
-    "submission_samplealias" ON ("submission_sample"."id" = "submission_samplealias"."sample_id")
+    RankedAliases ra ON ("submission_sample"."id" = ra.sample_id AND ra.rn = 1)
 WHERE (
     "submission_sample"."origin" = 'NCBI'
     AND "submission_genotyperesistance"."drug_id" IN (1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18)
@@ -61,7 +68,7 @@ def main(arguments):
         )
 
         # Save to local file first
-        df.to_csv(outfile, sep="\t", header=False, index=False)
+        df.to_csv(outfile, sep="\t", header=True, index=False)
 
         # Upload to S3 with hardcoded path, need to change this to the correct bucket
         s3_bucket = os.environ["S3_BUCKET"]
