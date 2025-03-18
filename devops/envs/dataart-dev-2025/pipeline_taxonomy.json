@@ -163,7 +163,7 @@
                                 "Next": "ReplaceFastqId"
                             }
                         ],
-                        "Default": "ChoiceSampleOriginForDownload"
+                        "Default": "choiceSampleOriginForDownload"
                     },
                     "ReplaceFastqId": {
                         "Type": "Pass",
@@ -171,24 +171,124 @@
                             "Id.$": "States.Format('lib_{}', $.SampleId)"
                         },
                         "ResultPath": "$.FastqId",
-                        "Next": "FixJSON"
+                        "Next": "FixJson"
                     },
-                    "FixJSON": {
+                    "FixJson": {
                         "Type": "Pass",
                         "InputPath": "$.FastqId.Id",
                         "ResultPath": "$.FastqId",
-                        "Next": "ChoiceSampleOriginForDownload"
+                        "Next": "choiceSampleOriginForDownload"
                     },
-                    "ChoiceSampleOriginForDownload": {
+                    "choiceSampleOriginForDownload": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.Location",
+                                "StringEquals": "TB-Kb",
+                                "Next": "iterateCopyReadsFromTbKb"
+                            },
+                            {
+                                "Or": [
+                                    {
+                                        "Variable": "$.Location",
+                                        "StringEquals": "NCBI"
+                                    },
+                                    {
+                                        "Variable": "$.Location",
+                                        "StringEquals": "CNCB"
+                                    }
+                                ],
+                                "Next": "externalFastqPass"
+                            }
+                        ],
+                        "Default": "FailUnknownLocation"
+                    },
+                    "externalFastqPass": {
+                        "Type": "Pass",
+                        "Result": {
+                            "R1Suffix": "1.fastq",
+                            "R2Suffix": "2.fastq"
+                        },
+                        "ResultPath": "$.Reads",
+                        "Next": "choiceDownloadProtocol"
+                    },
+                    "choiceDownloadProtocol": {
                         "Type": "Choice",
                         "Choices": [
                             {
                                 "Variable": "$.Location",
                                 "StringEquals": "NCBI",
-                                "Next": "SRAPass"
+                                "Next": "copyNcbiSraFromS3"
+                            },
+                            {
+                                "Variable": "$.Location",
+                                "StringEquals": "CNCB",
+                                "Next": "DownloadReadsFromCnc"
                             }
                         ],
-                        "Default": "S3Pass"
+                        "Default": "FailUnknownLocation"
+                    },
+                    "DownloadReadsFromCnc": {
+                        "Type": "Map",
+                        "ResultPath": null,
+                        "ItemsPath": "$.SequencingFile.FilePath",
+                        "Parameters": {
+                            "SampleId.$": "$.SampleId",
+                            "FastqPath.$": "$$.Map.Item.Value",
+                            "FastqId.$": "$.FastqId",
+                            "ReadNum.$": "States.MathAdd($$.Map.Item.Index, 1)",
+                            "JobDefEdgeTurbo": "${Samtools}",
+                            "BatchQueue.$": "$.JobQueueArn"
+                        },
+                        "Next": "Kraken",
+                        "Iterator": {
+                            "StartAt": "DownloadReadByFtp",
+                            "States": {
+                                "DownloadReadByFtp": {
+                                    "Type": "Task",
+                                    "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                    "Parameters": {
+                                        "JobName": "edge-turbo",
+                                        "JobDefinition.$": "$.JobDefEdgeTurbo",
+                                        "JobQueue.$": "$.BatchQueue",
+                                        "ContainerOverrides": {
+                                            "ResourceRequirements": [
+                                                {
+                                                    "Type": "VCPU",
+                                                    "Value": "1"
+                                                },
+                                                {
+                                                    "Type": "MEMORY",
+                                                    "Value": "4000"
+                                                }
+                                            ],
+                                            "Command": [
+                                                "/bin/bash",
+                                                "-c",
+                                                "Ref::COMMAND"
+                                            ]
+                                        },
+                                        "Parameters": {
+                                            "COMMAND.$": "States.Format('mkdir -p {}/ && cd {}/ && wget -qO- {} | gzip -d > {}_{}.fastq', $.SampleId, $.SampleId, $.FastqPath, $.FastqId, $.ReadNum)"
+                                        }
+                                    },
+                                    "Retry": [
+                                        {
+                                            "ErrorEquals": [
+                                                "Batch.AWSBatchException"
+                                            ],
+                                            "IntervalSeconds": 5,
+                                            "MaxAttempts": 10,
+                                            "BackoffRate": 2
+                                        }
+                                    ],
+                                    "End": true
+                                }
+                            }
+                        }
+                    },
+                    "FailUnknownLocation": {
+                        "Type": "Fail"
                     },
                     "S3Pass": {
                         "Type": "Pass",
@@ -197,29 +297,9 @@
                             "R2Suffix": "R2.fastq.gz"
                         },
                         "ResultPath": "$.Reads",
-                        "Next": "IterateCopyReadsFromS3"
+                        "Next": "Kraken"
                     },
-                    "SRAPass": {
-                        "Type": "Pass",
-                        "Result": {
-                            "R1Suffix": "1.fastq",
-                            "R2Suffix": "2.fastq"
-                        },
-                        "ResultPath": "$.Reads",
-                        "Next": "ChoiceDownloadProtocol"
-                    },
-                    "ChoiceDownloadProtocol": {
-                        "Type": "Choice",
-                        "Choices": [
-                            {
-                                "Variable": "$.SRADownloadProtocol",
-                                "IsPresent": true,
-                                "Next": "DownloadReadsFromSRA"
-                            }
-                        ],
-                        "Default": "CopySRAFromS3"
-                    },
-                    "CopySRAFromS3": {
+                    "copyNcbiSraFromS3": {
                         "Type": "Task",
                         "ResultPath": null,
                         "Resource": "arn:aws:states:::batch:submitJob.sync",
@@ -238,7 +318,7 @@
                             },
                             "Parameters": {
                                 "FASTQ_ID.$": "$.FastqId",
-                                "SAMPLE_ID.$": "$.SampleId"
+                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)"
                             }
                         },
                         "Retry": [
@@ -251,9 +331,9 @@
                                 "BackoffRate": 2
                             }
                         ],
-                        "Next": "NormalizeSRA"
+                        "Next": "normalizeSra"
                     },
-                    "NormalizeSRA": {
+                    "normalizeSra": {
                         "Type": "Task",
                         "ResultPath": null,
                         "Resource": "arn:aws:states:::batch:submitJob.sync",
@@ -270,40 +350,7 @@
                                 ]
                             },
                             "Parameters": {
-                                "SAMPLE_ID.$": "$.SampleId",
-                                "FASTQ_ID.$": "$.FastqId"
-                            }
-                        },
-                        "Retry": [
-                            {
-                                "ErrorEquals": [
-                                    "Batch.AWSBatchException"
-                                ],
-                                "IntervalSeconds": 5,
-                                "MaxAttempts": 10,
-                                "BackoffRate": 2
-                            }
-                        ],
-                        "Next": "Kraken"
-                    },
-                    "DownloadReadsFromSRA": {
-                        "Type": "Task",
-                        "ResultPath": null,
-                        "Resource": "arn:aws:states:::batch:submitJob.sync",
-                        "Parameters": {
-                            "JobName": "fasterq-dump",
-                            "JobDefinition": "${Sratools}",
-                            "JobQueue.$": "$.JobQueueArn",
-                            "ContainerOverrides": {
-                                "Command": [
-                                    "/bin/bash",
-                                    "/scripts/fasterq_dump.sh",
-                                    "Ref::SAMPLE_ID",
-                                    "Ref::FASTQ_ID"
-                                ]
-                            },
-                            "Parameters": {
-                                "SAMPLE_ID.$": "$.SampleId",
+                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
                                 "FASTQ_ID.$": "$.FastqId"
                             }
                         },
@@ -380,7 +427,7 @@
                         ],
                         "End": true
                     },
-                    "IterateCopyReadsFromS3": {
+                    "iterateCopyReadsFromTbKb": {
                         "Type": "Map",
                         "MaxConcurrency": 50,
                         "ResultPath": null,
@@ -392,11 +439,11 @@
                             "FastqId.$": "$.FastqId",
                             "JobQueueArn.$": "$.JobQueueArn"
                         },
-                        "Next": "Kraken",
+                        "Next": "S3Pass",
                         "Iterator": {
-                            "StartAt": "CopyReadsFromS3",
+                            "StartAt": "copyReadsFromTbKb",
                             "States": {
-                                "CopyReadsFromS3": {
+                                "copyReadsFromTbKb": {
                                     "Type": "Task",
                                     "ResultPath": null,
                                     "Resource": "arn:aws:states:::batch:submitJob.sync",
@@ -422,7 +469,7 @@
                                         "Parameters": {
                                             "FASTQ_PATH.$": "$.FastqPath",
                                             "FASTQ_ID.$": "$.FastqId",
-                                            "SAMPLE_ID.$": "$.SampleId",
+                                            "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
                                             "INDEX.$": "States.Format('{}', $.Index)",
                                             "BUCKET": "${sequenceDataBucket}"
                                         }
