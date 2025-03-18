@@ -165,7 +165,7 @@
                                 "Next": "ReplaceFastqId"
                             }
                         ],
-                        "Default": "ChoiceSampleOriginForDownload"
+                        "Default": "ParallelFastQC"
                     },
                     "ReplaceFastqId": {
                         "Type": "Pass",
@@ -179,255 +179,6 @@
                         "Type": "Pass",
                         "InputPath": "$.FastqId.Id",
                         "ResultPath": "$.FastqId",
-                        "Next": "ChoiceSampleOriginForDownload"
-                    },
-                    "ChoiceSampleOriginForDownload": {
-                        "Type": "Choice",
-                        "Choices": [
-                            {
-                                "Variable": "$.Location",
-                                "StringEquals": "TB-Kb",
-                                "Next": "IterateCopyReadsFromS3"
-                            },
-                            {
-                                "Or": [
-                                    {
-                                        "Variable": "$.Location",
-                                        "StringEquals": "NCBI"
-                                    },
-                                    {
-                                        "Variable": "$.Location",
-                                        "StringEquals": "CNCB"
-                                    }
-                                ],
-                                "Next": "ExternalFastqPass"
-                            }
-                        ],
-                        "Default": "FailUnknownLocation"
-                    },
-                    "ExternalFastqPass": {
-                        "Type": "Pass",
-                        "Result": {
-                            "R1Suffix": "1.fastq",
-                            "R2Suffix": "2.fastq"
-                        },
-                        "ResultPath": "$.Reads",
-                        "Next": "ChoiceDownloadProtocol"
-                    },
-                    "ChoiceDownloadProtocol": {
-                        "Type": "Choice",
-                        "Choices": [
-                            {
-                                "Variable": "$.Location",
-                                "StringEquals": "NCBI",
-                                "Next": "CopySRAFromS3"
-                            },
-                            {
-                                "Variable": "$.Location",
-                                "StringEquals": "CNCB",
-                                "Next": "DownloadReadsFromCNCB"
-                            }
-                        ],
-                        "Default": "FailUnknownLocation"
-                    },
-                    "FailUnknownLocation": {
-                        "Type": "Fail"
-                    },
-                    "DownloadReadsFromCNCB": {
-                        "Type": "Map",
-                        "ResultPath": null,
-                        "ItemsPath": "$.SequencingFile.FilePath",
-                        "Parameters": {
-                            "SampleId.$": "$.SampleId",
-                            "FastqPath.$": "$$.Map.Item.Value",
-                            "FastqId.$": "$.FastqId",
-                            "ReadNum.$": "States.MathAdd($$.Map.Item.Index, 1)",
-                            "JobDefEdgeTurbo": "${Mosdepth}",
-                            "BatchQueue.$": "$.JobQueueArn"
-                        },
-                        "Next": "ParallelFastQC",
-                        "Iterator": {
-                            "StartAt": "DownloadReadByFtp",
-                            "States": {
-                                "DownloadReadByFtp": {
-                                    "Type": "Task",
-                                    "Resource": "arn:aws:states:::batch:submitJob.sync",
-                                    "Parameters": {
-                                        "JobName": "edge-turbo",
-                                        "JobDefinition.$": "$.JobDefEdgeTurbo",
-                                        "JobQueue.$": "$.BatchQueue",
-                                        "ContainerOverrides": {
-                                            "ResourceRequirements": [
-                                                {
-                                                    "Type": "VCPU",
-                                                    "Value": "1"
-                                                },
-                                                {
-                                                    "Type": "MEMORY",
-                                                    "Value": "4000"
-                                                }
-                                            ],
-                                            "Command": [
-                                                "/bin/bash",
-                                                "-c",
-                                                "Ref::COMMAND"
-                                            ]
-                                        },
-                                        "Parameters": {
-                                            "COMMAND.$": "States.Format('mkdir -p {}/ && cd {}/ && wget -qO- {} | gzip -d > {}_{}.fastq', $.SampleId, $.SampleId, $.FastqPath, $.FastqId, $.ReadNum)"
-                                        }
-                                    },
-                                    "Retry": [
-                                        {
-                                            "ErrorEquals": [
-                                                "Batch.AWSBatchException"
-                                            ],
-                                            "IntervalSeconds": 5,
-                                            "MaxAttempts": 10,
-                                            "BackoffRate": 2.0
-                                        }
-                                    ],
-                                    "End":true
-                                }
-                            }
-                        }
-                    },
-                    "CopySRAFromS3": {
-                        "Type": "Task",
-                        "ResultPath": null,
-                        "Resource": "arn:aws:states:::batch:submitJob.sync",
-                        "Parameters": {
-                            "JobName": "CopyReadsFromS3",
-                            "JobDefinition": "${BioPython}",
-                            "JobQueue.$": "$.JobQueueArn",
-                            "ContainerOverrides": {
-                                "Command": [
-                                    "/scripts/copy_fastq_from_s3.py",
-                                    "--fastq_id",
-                                    "Ref::FASTQ_ID",
-                                    "--sample_id",
-                                    "Ref::SAMPLE_ID"
-                                ]
-                            },
-                            "Parameters": {
-                                "FASTQ_ID.$": "$.FastqId",
-                                "SAMPLE_ID.$": "$.SampleId"
-                            }
-                        },
-                        "Retry": [
-                            {
-                                "ErrorEquals": [
-                                    "Batch.AWSBatchException"
-                                ],
-                                "IntervalSeconds": 5,
-                                "MaxAttempts": 10,
-                                "BackoffRate": 2.0
-                            }
-                        ],
-                        "Next": "NormalizeSRA"
-                    },
-                    "NormalizeSRA": {
-                        "Type": "Task",
-                        "ResultPath": null,
-                        "Resource": "arn:aws:states:::batch:submitJob.sync",
-                        "Parameters": {
-                            "JobName": "fasterq-dump",
-                            "JobDefinition": "${Sratools}",
-                            "JobQueue.$": "$.JobQueueArn",
-                            "ContainerOverrides": {
-                                "Command": [
-                                    "/bin/bash",
-                                    "/scripts/normalized_to_fastq.sh",
-                                    "Ref::SAMPLE_ID",
-                                    "Ref::FASTQ_ID"
-                                ]
-                            },
-                            "Parameters": {
-                                "SAMPLE_ID.$": "$.SampleId",
-                                "FASTQ_ID.$": "$.FastqId"
-                            }
-                        },
-                        "Retry": [
-                            {
-                                "ErrorEquals": [
-                                    "Batch.AWSBatchException"
-                                ],
-                                "IntervalSeconds": 5,
-                                "MaxAttempts": 10,
-                                "BackoffRate": 2.0
-                            }
-                        ],
-                        "Next": "ParallelFastQC"
-                    },
-                    "IterateCopyReadsFromS3": {
-                        "Type": "Map",
-                        "MaxConcurrency": 50,
-                        "ResultPath": null,
-                        "ItemsPath": "$.SequencingFile.FilePath",
-                        "Parameters": {
-                            "SampleId.$": "$.SampleId",
-                            "FastqPath.$": "$$.Map.Item.Value",
-                            "Index.$": "$$.Map.Item.Index",
-                            "FastqId.$": "$.FastqId",
-                            "JobQueueArn.$": "$.JobQueueArn"
-                        },
-                        "Next": "S3Pass",
-                        "Iterator": {
-                            "StartAt": "CopyReadsFromS3",
-                            "States": {
-                                "CopyReadsFromS3": {
-                                    "Type": "Task",
-                                    "ResultPath": null,
-                                    "Resource": "arn:aws:states:::batch:submitJob.sync",
-                                    "Parameters": {
-                                        "JobName": "CopyReadsFromS3",
-                                        "JobDefinition": "${BioPython}",
-                                        "JobQueue.$": "$.JobQueueArn",
-                                        "ContainerOverrides": {
-                                            "Command": [
-                                                "/scripts/copy_fastq_from_s3.py",
-                                                "--fastq_path",
-                                                "Ref::FASTQ_PATH",
-                                                "--fastq_id",
-                                                "Ref::FASTQ_ID",
-                                                "--sample_id",
-                                                "Ref::SAMPLE_ID",
-                                                "--index",
-                                                "Ref::INDEX",
-                                                "--bucket",
-                                                "Ref::BUCKET"
-                                            ]
-                                        },
-                                        "Parameters": {
-                                            "FASTQ_PATH.$": "$.FastqPath",
-                                            "FASTQ_ID.$": "$.FastqId",
-                                            "SAMPLE_ID.$": "$.SampleId",
-                                            "INDEX.$": "States.Format('{}', $.Index)",
-                                            "BUCKET": "${sequenceDataBucket}"
-                                        }
-                                    },
-                                    "Retry": [
-                                        {
-                                            "ErrorEquals": [
-                                                "Batch.AWSBatchException"
-                                            ],
-                                            "IntervalSeconds": 5,
-                                            "MaxAttempts": 10,
-                                            "BackoffRate": 2.0
-                                        }
-                                    ],
-                                    "End": true
-                                }
-                            }
-                        }
-                    },
-                    "S3Pass": {
-                        "Type": "Pass",
-                        "Result": {
-                            "R1Suffix": "R1.fastq.gz",
-                            "R2Suffix": "R2.fastq.gz"
-                        },
-                        "ResultPath": "$.Reads",
                         "Next": "ParallelFastQC"
                     },
                     "ParallelFastQC": {
@@ -471,7 +222,7 @@
                                                 ],
                                                 "IntervalSeconds": 5,
                                                 "MaxAttempts": 10,
-                                                "BackoffRate": 2.0
+                                                "BackoffRate": 2
                                             },
                                             {
                                                 "ErrorEquals": [
@@ -512,7 +263,7 @@
                                                 ],
                                                 "IntervalSeconds": 5,
                                                 "MaxAttempts": 10,
-                                                "BackoffRate": 2.0
+                                                "BackoffRate": 2
                                             },
                                             {
                                                 "ErrorEquals": [
@@ -601,7 +352,7 @@
                                                 ],
                                                 "IntervalSeconds": 5,
                                                 "MaxAttempts": 10,
-                                                "BackoffRate": 2.0
+                                                "BackoffRate": 2
                                             },
                                             {
                                                 "ErrorEquals": [
@@ -675,7 +426,7 @@
                                     ],
                                     "IntervalSeconds": 5,
                                     "MaxAttempts": 10,
-                                    "BackoffRate": 2.0
+                                    "BackoffRate": 2
                                 }
                             ],
                             "Next": "ParallelGenotyping"
@@ -707,7 +458,7 @@
                                     ],
                                     "IntervalSeconds": 5,
                                     "MaxAttempts": 10,
-                                    "BackoffRate": 2.0
+                                    "BackoffRate": 2
                                 }
                             ],
                             "Next": "ParallelGenotyping"
@@ -752,7 +503,7 @@
                                                                     ],
                                                                     "IntervalSeconds": 5,
                                                                     "MaxAttempts": 10,
-                                                                    "BackoffRate": 2.0
+                                                                    "BackoffRate": 2
                                                                 }
                                                             ],
                                                             "End": true
@@ -800,7 +551,7 @@
                                                                     ],
                                                                     "IntervalSeconds": 5,
                                                                     "MaxAttempts": 10,
-                                                                    "BackoffRate": 2.0
+                                                                    "BackoffRate": 2
                                                                 }
                                                             ],
                                                             "End": true
@@ -845,7 +596,7 @@
                                                                     ],
                                                                     "IntervalSeconds": 5,
                                                                     "MaxAttempts": 10,
-                                                                    "BackoffRate": 2.0
+                                                                    "BackoffRate": 2
                                                                 }
                                                             ],
                                                             "End": true
@@ -883,7 +634,7 @@
                                                     ],
                                                     "IntervalSeconds": 5,
                                                     "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
+                                                    "BackoffRate": 2
                                                 }
                                             ],
                                             "End": true
@@ -936,7 +687,7 @@
                                                     ],
                                                     "IntervalSeconds": 5,
                                                     "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
+                                                    "BackoffRate": 2
                                                 },
                                                 {
                                                     "ErrorEquals": [
@@ -975,7 +726,7 @@
                                                     ],
                                                     "IntervalSeconds": 5,
                                                     "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
+                                                    "BackoffRate": 2
                                                 }
                                             ],
                                             "End": true
@@ -1022,7 +773,7 @@
                                                                     ],
                                                                     "IntervalSeconds": 5,
                                                                     "MaxAttempts": 10,
-                                                                    "BackoffRate": 2.0
+                                                                    "BackoffRate": 2
                                                                 }
                                                             ],
                                                             "End": true
@@ -1058,7 +809,7 @@
                                                                     ],
                                                                     "IntervalSeconds": 5,
                                                                     "MaxAttempts": 10,
-                                                                    "BackoffRate": 2.0
+                                                                    "BackoffRate": 2
                                                                 }
                                                             ],
                                                             "Next": "CalculateStats"
@@ -1092,7 +843,7 @@
                                                                     ],
                                                                     "IntervalSeconds": 5,
                                                                     "MaxAttempts": 10,
-                                                                    "BackoffRate": 2.0
+                                                                    "BackoffRate": 2
                                                                 }
                                                             ],
                                                             "End": true
@@ -1127,7 +878,7 @@
                                                     ],
                                                     "IntervalSeconds": 5,
                                                     "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
+                                                    "BackoffRate": 2
                                                 }
                                             ],
                                             "End": true
@@ -1163,73 +914,7 @@
                                                     ],
                                                     "IntervalSeconds": 5,
                                                     "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
-                                                }
-                                            ],
-                                            "End": true
-                                        }
-                                    }
-                                },
-                                {
-                                    "StartAt": "Kraken",
-                                    "States": {
-                                        "Kraken": {
-                                            "Type": "Task",
-                                            "ResultPath": null,
-                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
-                                            "Parameters": {
-                                                "JobName": "kraken",
-                                                "JobDefinition": "${Kraken}",
-                                                "JobQueue.$": "$.JobQueueArn",
-                                                "ContainerOverrides": {
-                                                    "Command": [
-                                                        "/bin/bash",
-                                                        "-c",
-                                                        "Ref::COMMAND"
-                                                    ]
-                                                },
-                                                "Parameters": {
-                                                    "COMMAND.$": "States.Format('kraken2 --db references/{} --threads 1 --report {}/{}-kraken.txt --paired {}/*.f*q* > {}/{}-kraken-full.txt', $.KrakenDbName, $.SampleId, $.SampleId, $.SampleId, $.SampleId, $.SampleId)"
-                                                }
-                                            },
-                                            "Retry": [
-                                                {
-                                                    "ErrorEquals": [
-                                                        "Batch.AWSBatchException"
-                                                    ],
-                                                    "IntervalSeconds": 5,
-                                                    "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
-                                                }
-                                            ],
-                                            "Next": "PrepareKraken"
-                                        },
-                                        "PrepareKraken": {
-                                            "Type": "Task",
-                                            "ResultPath": null,
-                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
-                                            "Parameters": {
-                                                "JobName": "prepare-kraken",
-                                                "JobDefinition": "${BioPython}",
-                                                "JobQueue.$": "$.JobQueueArn",
-                                                "ContainerOverrides": {
-                                                    "Command": [
-                                                        "/scripts/format_taxonomy_assignment.py",
-                                                        "Ref::FILE"
-                                                    ]
-                                                },
-                                                "Parameters": {
-                                                    "FILE.$": "States.Format('{}/{}', $.SampleId, $.SampleId)"
-                                                }
-                                            },
-                                            "Retry": [
-                                                {
-                                                    "ErrorEquals": [
-                                                        "Batch.AWSBatchException"
-                                                    ],
-                                                    "IntervalSeconds": 5,
-                                                    "MaxAttempts": 10,
-                                                    "BackoffRate": 2.0
+                                                    "BackoffRate": 2
                                                 }
                                             ],
                                             "End": true
@@ -1434,7 +1119,7 @@
                     ],
                     "IntervalSeconds": 5,
                     "MaxAttempts": 10,
-                    "BackoffRate": 2.0
+                    "BackoffRate": 2
                 }
             ],
             "Next": "CleanOutput"
