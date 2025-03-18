@@ -33,7 +33,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "SuccessEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "getLibraryIdsForSample"
@@ -69,7 +69,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "SuccessEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "getLibraryCountForSample"
@@ -105,7 +105,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "SuccessEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "checkNonEmptiness"
@@ -116,7 +116,7 @@
                 {
                     "Variable": "$.LibraryCounts.Value",
                     "NumericEquals": 0,
-                    "Next": "SuccessEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Default": "IterateLibraries"
@@ -124,6 +124,7 @@
         "IterateLibraries": {
             "Type": "Map",
             "MaxConcurrency": 50,
+            "ResultPath": "$",
             "OutputPath": "$[0]",
             "ItemsPath": "$.LibraryIds.Value",
             "Parameters": {
@@ -451,10 +452,20 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "WaitThirtySeconds",
+                    "Next": "PrepParams",
                     "ResultPath": null
                 }
             ]
+        },
+        "PrepParams": {
+            "Type": "Pass",
+            "Parameters": {
+                "SampleId.$": "$.SampleId.Value",
+                "JobQueueArn.$": "$.JobQueueArn",
+                "DbConnection.$": "$.DbConnection"
+            },
+            "ResultPath": "$",
+            "Next": "WaitThirtySeconds"
         },
         "WaitThirtySeconds": {
             "Type": "Wait",
@@ -477,7 +488,7 @@
                     ]
                 },
                 "Parameters": {
-                    "COMMAND.$": "States.Format('rm -rf {}/ */{}-*', $.SampleId, $.SampleId)"
+                    "COMMAND.$": "States.Format('rm -rf {}/ */{}-* taxonom-analysis/{}-*', $.SampleId, $.SampleId, $.SampleId)"
                 }
             },
             "Next": "passFailStatus",
@@ -502,7 +513,7 @@
         "passSuccessStatus": {
             "Type": "Pass",
             "Result": {
-                "Value": "Taxon"
+                "Value": "Taxonomy succeeded"
             },
             "ResultPath": "$.AnalysisStatus",
             "Next": "UpdateStatus"
@@ -516,7 +527,7 @@
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "UPDATE submission_sample\n SET    bioanalysis_status = %s, bioanalysis_status_changed_at=now() \n WHERE  id = %s;",
-                    "QueryParams.$": "States.Array($.AnalysisStatus.Value, $.SampleId.Value)"
+                    "QueryParams.$": "States.Array($.AnalysisStatus.Value, $.SampleId)"
                 }
             },
             "ResultPath": null,
@@ -528,9 +539,6 @@
             "OutputPath": null,
             "ResultPath": "$",
             "End": true
-        },
-        "SuccessEnd": {
-            "Type": "Succeed"
         }
     }
 }
