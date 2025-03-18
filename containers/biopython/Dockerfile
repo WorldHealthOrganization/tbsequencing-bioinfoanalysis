@@ -37,6 +37,8 @@ ADD load_annotation_variants.py /scripts/
 
 ADD fix_gff_for_snpEff.py /scripts/
 
+ADD dump_csv.py /scripts/
+
 WORKDIR /scratch
 
 ENTRYPOINT ["python"]
