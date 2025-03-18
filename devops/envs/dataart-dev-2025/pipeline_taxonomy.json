@@ -1,8 +1,8 @@
 {
     "Comment": "Per sample analysis workflow. Receives the sample name and a batch queue, starts the analysis and captures errors.",
-    "StartAt": "getSampleName",
+    "StartAt": "updateSampleStatus",
     "States": {
-        "getSampleName": {
+        "updateSampleStatus": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
@@ -10,14 +10,11 @@
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Processing', bioanalysis_status_changed_at=now() \n WHERE  id = %s \n RETURNING id::TEXT;",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Processing taxonomy', bioanalysis_status_changed_at=now() \n WHERE  id = %s \n;",
                     "QueryParams.$": "States.Array($.SampleId)"
                 }
             },
-            "ResultPath": "$.SampleId",
-            "ResultSelector": {
-                "Value.$": "$.Payload[0][0]"
-            },
+            "ResultPath": null,
             "Retry": [
                 {
                     "ErrorEquals": [
@@ -47,7 +44,7 @@
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "WITH min_library_name (id, library_name) AS ( SELECT id, MIN(library_name) FROM submission_sequencingdata where sample_id=%s  group by id ORDER by id ASC ) SELECT DISTINCT MIN(sq.library_name) as library_name, sq.data_location, CASE WHEN sq.library_preparation_strategy='WGS' THEN 'WGS' WHEN Assay IS NOT NULL THEN Assay ELSE 'drug_resistance_genes' END, agg_files.files_paths FROM submission_sequencingdata sq CROSS JOIN ( SELECT array_agg(files.file_path) as files_paths FROM ( SELECT DISTINCT sq.file_path FROM submission_sequencingdata sq INNER JOIN submission_sequencingdatahash sqh ON sqh.sequencing_data_id = sq.id INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED') files ) agg_files INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED' GROUP BY sq.data_location, sq.library_preparation_strategy, sq.assay, agg_files.files_paths;",
-                    "QueryParams.$": "States.Array($.SampleId.Value, $.SampleId.Value, $.SampleId.Value)"
+                    "QueryParams.$": "States.Array($.SampleId, $.SampleId, $.SampleId)"
                 }
             },
             "ResultPath": "$.LibraryIds",
@@ -83,7 +80,7 @@
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "SELECT count(DISTINCT sq.library_name) FROM submission_sequencingdata sq INNER  JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.library_layout='PAIRED' AND sq.sequencing_platform='ILLUMINA' AND sq.library_name is not NULL;",
-                    "QueryParams.$": "States.Array($.SampleId.Value)"
+                    "QueryParams.$": "States.Array($.SampleId)"
                 }
             },
             "ResultPath": "$.LibraryCounts",
@@ -130,7 +127,7 @@
             "Parameters": {
                 "Execution.$": "$$.Execution.Name",
                 "JobQueueArn.$": "$.JobQueueArn",
-                "SampleId.$": "$.SampleId.Value",
+                "SampleId.$": "$.SampleId",
                 "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
                 "AssemblyName.$": "$.AssemblyName",
                 "ReferenceName.$": "States.Format('{}_{}', $.RefseqAssemblyAccession, $.AssemblyName)",
@@ -452,17 +449,20 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "PrepParams",
+                    "Next": "passFailStatus",
                     "ResultPath": null
                 }
             ]
         },
-        "PrepParams": {
+        "passFailStatus": {
             "Type": "Pass",
             "Parameters": {
                 "SampleId.$": "$.SampleId.Value",
                 "JobQueueArn.$": "$.JobQueueArn",
-                "DbConnection.$": "$.DbConnection"
+                "DbConnection.$": "$.DbConnection",
+                "Result": {
+                    "Value": "Taxonomy failed"
+                }
             },
             "ResultPath": "$",
             "Next": "WaitThirtySeconds"
@@ -491,24 +491,16 @@
                     "COMMAND.$": "States.Format('rm -rf {}/ */{}-* taxonom-analysis/{}-*', $.SampleId, $.SampleId, $.SampleId)"
                 }
             },
-            "Next": "passFailStatus",
+            "Next": "UpdateStatus",
             "Catch": [
                 {
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "passFailStatus",
+                    "Next": "UpdateStatus",
                     "ResultPath": null
                 }
             ]
-        },
-        "passFailStatus": {
-            "Type": "Pass",
-            "Result": {
-                "Value": "Taxonomy failed"
-            },
-            "ResultPath": "$.AnalysisStatus",
-            "Next": "UpdateStatus"
         },
         "passSuccessStatus": {
             "Type": "Pass",
