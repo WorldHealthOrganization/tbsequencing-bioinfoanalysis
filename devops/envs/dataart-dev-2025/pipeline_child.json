@@ -1,23 +1,20 @@
 {
     "Comment": "Per sample analysis workflow. Receives the sample name and a batch queue, starts the analysis and captures errors.",
-    "StartAt": "getSampleName",
+    "StartAt": "updateSampleStatus",
     "States": {
-        "getSampleName": {
+        "updateSampleStatus": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${getSampleName}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Processing', bioanalysis_status_changed_at=now() \n WHERE  id = %s \n RETURNING id::TEXT;",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Processing', bioanalysis_status_changed_at=now() \n WHERE  id = %s \n;",
                     "QueryParams.$": "States.Array($.SampleId)"
                 }
             },
-            "ResultPath": "$.SampleId",
-            "ResultSelector": {
-                "Value.$": "$.Payload[0][0]"
-            },
+            "ResultPath": null,
             "Retry": [
                 {
                     "ErrorEquals": [
@@ -33,7 +30,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "FailEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "getLibraryIdsForSample"
@@ -42,12 +39,12 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${getLibraryIdsForSample}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "WITH min_library_name (id, library_name) AS ( SELECT id, MIN(library_name) FROM submission_sequencingdata where sample_id=%s  group by id ORDER by id ASC ) SELECT DISTINCT MIN(sq.library_name) as library_name, sq.data_location, CASE WHEN sq.library_preparation_strategy='WGS' THEN 'WGS' WHEN Assay IS NOT NULL THEN Assay ELSE 'drug_resistance_genes' END, agg_files.files_paths FROM submission_sequencingdata sq CROSS JOIN ( SELECT array_agg(files.file_path) as files_paths FROM ( SELECT DISTINCT sq.file_path FROM submission_sequencingdata sq LEFT JOIN submission_sequencingdatahash sqh ON sqh.sequencing_data_id = sq.id INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED' AND (sqh.id IS NOT null or data_location='CNCB')) files ) agg_files INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED'  GROUP BY sq.data_location, sq.library_preparation_strategy, sq.assay, agg_files.files_paths;",
-                    "QueryParams.$": "States.Array($.SampleId.Value, $.SampleId.Value, $.SampleId.Value)"
+                    "QueryParams.$": "States.Array($.SampleId, $.SampleId, $.SampleId)"
                 }
             },
             "ResultPath": "$.LibraryIds",
@@ -69,7 +66,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "FailEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "getLibraryCountForSample"
@@ -78,12 +75,12 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${getLibraryCountForSample}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "SELECT count(DISTINCT sq.library_name) FROM submission_sequencingdata sq INNER  JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.library_layout='PAIRED' AND sq.sequencing_platform='ILLUMINA' AND sq.library_name is not NULL;",
-                    "QueryParams.$": "States.Array($.SampleId.Value)"
+                    "QueryParams.$": "States.Array($.SampleId)"
                 }
             },
             "ResultPath": "$.LibraryCounts",
@@ -105,7 +102,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "FailEnd"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "checkNonEmptiness"
@@ -116,12 +113,12 @@
                 {
                     "Variable": "$.LibraryCounts.Value",
                     "NumericEquals": 0,
-                    "Next": "Fail"
+                    "Next": "passFailStatus"
                 }
             ],
-            "Default": "IterateAlignment"
+            "Default": "iterateLibraries"
         },
-        "IterateAlignment": {
+        "iterateLibraries": {
             "Type": "Map",
             "MaxConcurrency": 50,
             "OutputPath": "$[0]",
@@ -129,7 +126,7 @@
             "Parameters": {
                 "Execution.$": "$$.Execution.Name",
                 "JobQueueArn.$": "$.JobQueueArn",
-                "SampleId.$": "$.SampleId.Value",
+                "SampleId.$": "$.SampleId",
                 "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
                 "AssemblyName.$": "$.AssemblyName",
                 "ReferenceName.$": "States.Format('{}_{}', $.RefseqAssemblyAccession, $.AssemblyName)",
@@ -165,7 +162,7 @@
                                 "Next": "ReplaceFastqId"
                             }
                         ],
-                        "Default": "ParallelFastQC"
+                        "Default": "choiceSampleOriginForDownload"
                     },
                     "ReplaceFastqId": {
                         "Type": "Pass",
@@ -175,10 +172,56 @@
                         "ResultPath": "$.FastqId",
                         "Next": "FixJSON"
                     },
+                    "failUnknownLocation": {
+                        "Type": "Fail"
+                    },
+
                     "FixJSON": {
                         "Type": "Pass",
                         "InputPath": "$.FastqId.Id",
                         "ResultPath": "$.FastqId",
+                        "Next": "choiceSampleOriginForDownload"
+                    },
+                    "choiceSampleOriginForDownload": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.Location",
+                                "StringEquals": "TB-Kb",
+                                "Next": "internalFastqPass"
+                            },
+                            {
+                                "Or": [
+                                    {
+                                        "Variable": "$.Location",
+                                        "StringEquals": "NCBI"
+                                    },
+                                    {
+                                        "Variable": "$.Location",
+                                        "StringEquals": "CNCB"
+                                    }
+                                ],
+                                "Next": "externalFastqPass"
+                            }
+                        ],
+                        "Default": "failUnknownLocation"
+                    },
+                    "internalFastqPass": {
+                        "Type": "Pass",
+                        "Result": {
+                            "R1Suffix": "R1.fastq.gz",
+                            "R2Suffix": "R2.fastq.gz"
+                        },
+                        "ResultPath": "$.Reads",
+                        "Next": "ParallelFastQC"
+                    },
+                    "externalFastqPass": {
+                        "Type": "Pass",
+                        "Result": {
+                            "R1Suffix": "1.fastq",
+                            "R2Suffix": "2.fastq"
+                        },
+                        "ResultPath": "$.Reads",
                         "Next": "ParallelFastQC"
                     },
                     "ParallelFastQC": {
@@ -208,7 +251,7 @@
                                                 ]
                                             },
                                             "Parameters": {
-                                                "SAMPLE_ID.$": "$.SampleId",
+                                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
                                                 "FASTQ_ID.$": "$.FastqId",
                                                 "REFERENCE_NAME.$": "$.ReferenceName",
                                                 "R1SUFFIX.$": "$.Reads.R1Suffix",
@@ -252,7 +295,7 @@
                                                 ]
                                             },
                                             "Parameters": {
-                                                "SAMPLE_ID.$": "$.SampleId",
+                                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
                                                 "FASTQ_ID.$": "$.FastqId"
                                             }
                                         },
@@ -339,7 +382,7 @@
                                                 ]
                                             },
                                             "Parameters": {
-                                                "SAMPLE_ID.$": "$.SampleId",
+                                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
                                                 "FASTQ_ID.$": "$.FastqId",
                                                 "R1SUFFIX.$": "$.Reads.R1Suffix",
                                                 "R2SUFFIX.$": "$.Reads.R2Suffix"
@@ -941,7 +984,7 @@
         "PrepParams": {
             "Type": "Pass",
             "Parameters": {
-                "SampleId.$": "$.SampleId.Value",
+                "SampleId.$": "$.SampleId",
                 "JobQueueArn.$": "$.JobQueueArn",
                 "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
                 "AssemblyName.$": "$.AssemblyName",
@@ -949,6 +992,19 @@
                 "ReferenceName.$": "States.Format('{}_{}', $.RefseqAssemblyAccession, $.AssemblyName)",
                 "NucleotideAccession.$": "$.NucleotideAccession",
                 "KrakenDbName.$": "$.KrakenDbName"
+            },
+            "ResultPath": "$",
+            "Next": "WaitThirtySeconds"
+        },
+        "passFailStatus": {
+            "Type": "Pass",
+            "Parameters": {
+                "SampleId.$": "$.SampleId",
+                "JobQueueArn.$": "$.JobQueueArn",
+                "DbConnection.$": "$.DbConnection",
+                "Result": {
+                    "Value": "Failed to extract"
+                }
             },
             "ResultPath": "$",
             "Next": "WaitThirtySeconds"
@@ -1004,14 +1060,11 @@
             "ResultPath": "$.AnalysisStatus",
             "Next": "UpdateStatus"
         },
-        "FailEnd": {
-            "Type": "Fail"
-        },
         "UpdateStatus": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "FunctionName": "${UpdateStatus}",
+                "FunctionName": "${LambdaQueryRDS}",
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
@@ -1070,7 +1123,7 @@
                         "ResultPath": null,
                         "Resource": "arn:aws:states:::lambda:invoke",
                         "Parameters": {
-                            "FunctionName": "${UpdateStatus}",
+                            "FunctionName": "${LambdaQueryRDS}",
                             "Payload": {
                                 "DbConnection.$": "$.DbConnection",
                                 "CalledFunction": "run_query",
