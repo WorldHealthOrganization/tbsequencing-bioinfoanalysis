@@ -43,7 +43,7 @@
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "WITH min_library_name (id, library_name) AS ( SELECT id, MIN(library_name) FROM submission_sequencingdata where sample_id=%s  group by id ORDER by id ASC ) SELECT DISTINCT MIN(sq.library_name) as library_name, sq.data_location, CASE WHEN sq.library_preparation_strategy='WGS' THEN 'WGS' WHEN Assay IS NOT NULL THEN Assay ELSE 'drug_resistance_genes' END, agg_files.files_paths FROM submission_sequencingdata sq CROSS JOIN ( SELECT array_agg(files.file_path) as files_paths FROM ( SELECT DISTINCT sq.file_path FROM submission_sequencingdata sq INNER JOIN submission_sequencingdatahash sqh ON sqh.sequencing_data_id = sq.id INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED') files ) agg_files INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED' GROUP BY sq.data_location, sq.library_preparation_strategy, sq.assay, agg_files.files_paths;",
+                    "Query": "WITH min_library_name (id, library_name) AS ( SELECT id, MIN(library_name) FROM submission_sequencingdata where sample_id=%s  group by id ORDER by id ASC ) SELECT DISTINCT MIN(sq.library_name) as library_name, sq.data_location, CASE WHEN sq.library_preparation_strategy='WGS' THEN 'WGS' WHEN Assay IS NOT NULL THEN Assay ELSE 'drug_resistance_genes' END, agg_files.files_paths FROM submission_sequencingdata sq CROSS JOIN ( SELECT array_agg(files.file_path) as files_paths FROM ( SELECT DISTINCT sq.file_path FROM submission_sequencingdata sq LEFT JOIN submission_sequencingdatahash sqh ON sqh.sequencing_data_id = sq.id INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED' AND (sqh.id IS NOT null or data_location='CNCB')) files ) agg_files INNER JOIN submission_sample ss ON ss.id = sq.sample_id WHERE ss.id=%s AND sq.sequencing_platform='ILLUMINA' AND sq.library_layout='PAIRED'  GROUP BY sq.data_location, sq.library_preparation_strategy, sq.assay, agg_files.files_paths;",
                     "QueryParams.$": "States.Array($.SampleId, $.SampleId, $.SampleId)"
                 }
             },
@@ -185,7 +185,7 @@
                             {
                                 "Variable": "$.Location",
                                 "StringEquals": "TB-Kb",
-                                "Next": "iterateCopyReadsFromTbKb"
+                                "Next": "internalFastqPass"
                             },
                             {
                                 "Or": [
@@ -201,7 +201,16 @@
                                 "Next": "externalFastqPass"
                             }
                         ],
-                        "Default": "FailUnknownLocation"
+                        "Default": "failUnknownLocation"
+                    },
+                    "internalFastqPass": {
+                        "Type": "Pass",
+                        "Result": {
+                            "R1Suffix": "R1.fastq.gz",
+                            "R2Suffix": "R2.fastq.gz"
+                        },
+                        "ResultPath": "$.Reads",
+                        "Next": "iterateCopyReadsFromTbKb"
                     },
                     "externalFastqPass": {
                         "Type": "Pass",
@@ -226,7 +235,7 @@
                                 "Next": "DownloadReadsFromCnc"
                             }
                         ],
-                        "Default": "FailUnknownLocation"
+                        "Default": "failUnknownLocation"
                     },
                     "DownloadReadsFromCnc": {
                         "Type": "Map",
@@ -287,17 +296,8 @@
                             }
                         }
                     },
-                    "FailUnknownLocation": {
+                    "failUnknownLocation": {
                         "Type": "Fail"
-                    },
-                    "S3Pass": {
-                        "Type": "Pass",
-                        "Result": {
-                            "R1Suffix": "R1.fastq.gz",
-                            "R2Suffix": "R2.fastq.gz"
-                        },
-                        "ResultPath": "$.Reads",
-                        "Next": "Kraken"
                     },
                     "copyNcbiSraFromS3": {
                         "Type": "Task",
@@ -439,7 +439,7 @@
                             "FastqId.$": "$.FastqId",
                             "JobQueueArn.$": "$.JobQueueArn"
                         },
-                        "Next": "S3Pass",
+                        "Next": "Kraken",
                         "Iterator": {
                             "StartAt": "copyReadsFromTbKb",
                             "States": {
