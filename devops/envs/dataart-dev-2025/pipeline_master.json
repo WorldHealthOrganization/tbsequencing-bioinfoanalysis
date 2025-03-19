@@ -302,9 +302,92 @@
                     }
                 }
             },
-            "Next": "VariantAnalysis"
+            "Next": "uploadTaxonomyToS3"
         },
-        "VariantAnalysis": {
+        "uploadTaxonomyToS3": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "ResultPath": null,
+            "Parameters": {
+                "JobName": "upload-to-s3",
+                "JobDefinition": "${BioPython}",
+                "JobQueue.$": "$.JobQueueArn",
+                "ContainerOverrides": {
+                    "Command": [
+                        "/scripts/export_to_s3.py",
+                        "--output_bucket",
+                        "Ref::OutputBucket",
+                        "--folder",
+                        "taxonomy-assignment"
+                    ]
+                },
+                "Parameters": {
+                    "OutputBucket.$": "$.OutputBucket"
+                }
+            },
+            "Next": "insertTaxonomy"
+        },
+
+        "insertTaxonomy": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "${GlueTaxonomyJobName}"
+            },
+            "Next": "updateSampleStatusTaxonomyInserted"
+        },
+        "updateSampleStatusTaxonomyInserted": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Taxonomy inserted', bioanalysis_status_changed_at=now() \n WHERE  bioanalysis_status = 'Taxonomy succeeded';"
+                }
+            },
+            "ResultPath": null,
+            "Next": "getSamplesTaxonomySucceeded"
+        },
+        "getSamplesTaxonomySucceeded":{
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "WITH taxosucceeded AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Taxonomy succeeded') SELECT '{\"Ids\":['||string_agg(taxosucceeded.sampleid::text, ',')||']}' FROM taxosucceeded;"
+                }
+            },
+            "ResultPath": "$.Samples",
+            "ResultSelector": {
+                "Value.$": "$.Payload"
+            },
+            "Next": "checkForSamplesTaxoSucceeded"
+
+        },
+        "checkForSamplesTaxoSucceeded": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Samples.Value[0][0]",
+                    "IsNull": true,
+                    "Next": "NoSampleToProcess"
+                }
+            ],
+            "Default": "formatSampleArrayAgain"
+        },
+        "formatSampleArrayAgain": {
+            "Type": "Pass",
+            "Next": "createResources",
+            "Parameters": {
+                "List.$": "States.StringToJson($.Samples.Value[0][0])"
+            },
+            "ResultPath": "$.Samples"
+        },
+        "variantAnalysis": {
             "Type": "Map",
             "MaxConcurrencyPath": "$.Concurrency",
             "ResultPath": null,

@@ -504,7 +504,7 @@
         "passFailStatus": {
             "Type": "Pass",
             "Parameters": {
-                "SampleId.$": "$.SampleId.Value",
+                "SampleId.$": "$.SampleId",
                 "JobQueueArn.$": "$.JobQueueArn",
                 "DbConnection.$": "$.DbConnection",
                 "Result": {
