@@ -5,9 +5,6 @@ import argparse
 import os
 
 
-FOLDERS_TO_EXPORT = ["genotype", "global-stats", "locus-stats", "deletion", "taxonomy-assignment", "alignment"]
-
-
 def main(args):
     bucket_name = args.output_bucket
     s3 = boto3.client('s3')
