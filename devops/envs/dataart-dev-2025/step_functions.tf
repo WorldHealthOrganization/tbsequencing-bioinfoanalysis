@@ -23,12 +23,9 @@ module "pipeline_child" {
       Bedtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bedtools"]
       FastQC    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-FastQC"]
 
-      getSampleName            = module.bioanalysis-QueryRDS.lambda_function_arn
-      getLibraryIdsForSample   = module.bioanalysis-QueryRDS.lambda_function_arn
-      getLibraryCountForSample = module.bioanalysis-QueryRDS.lambda_function_arn
-      UpdateStatus             = module.bioanalysis-QueryRDS.lambda_function_arn
+      LambdaQueryRDS = module.bioanalysis-QueryRDS.lambda_function_arn
 
-      sequenceDataBucket = "${var.project_name}-main-${var.environment}-backend-sequence-data"
+      sequenceDataBucket = data.aws_ssm_parameter.sequence_data_bucket_name.value
   })
 
 
@@ -61,7 +58,7 @@ module "pipeline_taxonomy" {
       Samtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
 
       LambdaQueryRDS     = module.bioanalysis-QueryRDS.lambda_function_arn
-      sequenceDataBucket = "${var.project_name}-main-${var.environment}-backend-sequence-data"
+      sequenceDataBucket = data.aws_ssm_parameter.sequence_data_bucket_name.value
   })
 
 

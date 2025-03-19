@@ -84,3 +84,7 @@ data "aws_iam_role" "fargate_task" {
 data "aws_iam_policy" "rds_iam_access" {
   arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-main-${var.environment}-rds_access"
 }
+
+data "aws_ssm_parameter" "sequence_data_bucket_name" {
+  name = "/${var.environment}/sequence_data_bucket_name"
+}
