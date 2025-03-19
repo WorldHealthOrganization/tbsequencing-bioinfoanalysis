@@ -469,32 +469,6 @@
                     }
                 },
                 {
-                    "StartAt": "insertTaxonomy",
-                    "States": {
-                        "insertTaxonomy": {
-                            "Type": "Task",
-                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
-                            "Parameters": {
-                                "JobName": "${GlueTaxonomyJobName}"
-                            },
-                            "Catch": [
-                                {
-                                    "ErrorEquals": [
-                                        "States.ALL"
-                                    ],
-                                    "ResultPath": "$.Error",
-                                    "Next": "failEndTaxonomy"
-                                }
-                            ],
-                            "End": true
-                        },
-                        "failEndTaxonomy": {
-                            "Type": "Pass",
-                            "End": true
-                        }
-                    }
-                },
-                {
                     "StartAt": "insertLocusStats",
                     "States": {
                         "insertLocusStats": {
@@ -570,10 +544,6 @@
                         },
                         {
                             "Variable": "$[3].Error",
-                            "IsPresent": true
-                        },
-                        {
-                            "Variable": "$[4].Error",
                             "IsPresent": true
                         }
                     ],
