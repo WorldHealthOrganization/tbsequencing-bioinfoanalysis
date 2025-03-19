@@ -258,14 +258,7 @@ module "create_resources" {
       DbPassword = "RDS"
       DbPort     = "5432"
 
-      GlueGenotypeJobName      = module.glue.glue_job_name["genotype"]
-      GlueDellyGenotypeJobName = module.glue.glue_job_name["deletion"]
-      GlueDelVariantsJobName   = module.glue.glue_job_name["del_variants"]
-      GlueJoinGenotypeJobName  = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName      = module.glue.glue_job_name["taxonomy_assignment"]
-      GlueLocusStatsJobName    = module.glue.glue_job_name["locus_stats"]
-      GlueGlobalStatsJobName   = module.glue.glue_job_name["global_stats"]
-
+      GlueTaxonomyJobName = module.glue.glue_job_name["taxonomy_assignment"]
   })
 }
 
@@ -397,7 +390,6 @@ module "pipeline_insert_processed_data" {
       GlueDellyGenotypeJobName  = module.glue.glue_job_name["deletion"]
       GlueDelVariantsJobName    = module.glue.glue_job_name["del_variants"]
       GlueJoinGenotypeJobName   = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName       = module.glue.glue_job_name["taxonomy_assignment"]
       GlueLocusStatsJobName     = module.glue.glue_job_name["locus_stats"]
       GlueGlobalStatsJobName    = module.glue.glue_job_name["global_stats"]
 

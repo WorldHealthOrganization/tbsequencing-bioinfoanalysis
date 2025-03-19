@@ -232,12 +232,12 @@
                             {
                                 "Variable": "$.Location",
                                 "StringEquals": "CNCB",
-                                "Next": "DownloadReadsFromCnc"
+                                "Next": "DownloadReadsFromCncb"
                             }
                         ],
                         "Default": "failUnknownLocation"
                     },
-                    "DownloadReadsFromCnc": {
+                    "DownloadReadsFromCncb": {
                         "Type": "Map",
                         "ResultPath": null,
                         "ItemsPath": "$.SequencingFile.FilePath",
