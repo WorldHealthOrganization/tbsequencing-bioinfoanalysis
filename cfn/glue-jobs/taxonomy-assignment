@@ -34,7 +34,7 @@ sample = (
         table_name=dbname + "_public_submission_sample"
     )
     .filter(
-        f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
+        f=lambda x: x["bioanalysis_status"]=="Taxonomy succeeded"
     )
 )
 
