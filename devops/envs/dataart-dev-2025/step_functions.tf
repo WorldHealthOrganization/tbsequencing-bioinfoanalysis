@@ -208,6 +208,7 @@ data "aws_iam_policy_document" "master_pipeline" {
       "ec2:deleteLaunchTemplate",
       "states:ListExecutions",
       "tag:GetResources",
+      "glue:StartJobRun"
     ]
     resources = [
       "*",
