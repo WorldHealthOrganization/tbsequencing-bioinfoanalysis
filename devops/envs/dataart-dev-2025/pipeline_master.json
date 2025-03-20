@@ -331,6 +331,7 @@
         "insertTaxonomy": {
             "Type": "Task",
             "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "ResultPath": null,
             "Parameters": {
                 "JobName": "${GlueTaxonomyJobName}"
             },
@@ -344,7 +345,9 @@
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Taxonomy inserted', bioanalysis_status_changed_at=now() \n WHERE  bioanalysis_status = 'Taxonomy succeeded';"
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Taxonomy inserted', bioanalysis_status_changed_at=now() \n WHERE  bioanalysis_status = 'Taxonomy succeeded' and id in %s;" ,
+                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
+
                 }
             },
             "ResultPath": null,
@@ -358,7 +361,8 @@
                 "Payload": {
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
-                    "Query": "WITH taxosucceeded AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Taxonomy succeeded') SELECT '{\"Ids\":['||string_agg(taxosucceeded.sampleid::text, ',')||']}' FROM taxosucceeded;"
+                    "Query": "WITH taxosucceeded AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Taxonomy inserted' and id in %s) SELECT '{\"Ids\":['||string_agg(taxosucceeded.sampleid::text, ',')||']}' FROM taxosucceeded;",
+                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
                 }
             },
             "ResultPath": "$.Samples",
@@ -381,7 +385,7 @@
         },
         "formatSampleArrayAgain": {
             "Type": "Pass",
-            "Next": "createResources",
+            "Next": "variantAnalysis",
             "Parameters": {
                 "List.$": "States.StringToJson($.Samples.Value[0][0])"
             },
@@ -457,18 +461,7 @@
                 "Value": "Succeeded"
             },
             "ResultPath": "$.ExtractionStatus",
-            "Next": "checkNonEmptiness"
-        },
-        "checkNonEmptiness": {
-            "Type": "Choice",
-            "Choices": [
-                {
-                    "Variable": "$.Samples.Value[0]",
-                    "IsPresent": false,
-                    "Next": "DeleteResources"
-                }
-            ],
-            "Default": "UploadToS3"
+            "Next": "UploadToS3"
         },
         "DeleteResources": {
             "Type": "Task",
@@ -503,7 +496,15 @@
                     "Command": [
                         "/scripts/export_to_s3.py",
                         "--output_bucket",
-                        "Ref::OutputBucket"
+                        "Ref::OutputBucket",
+                        "--folder",
+                        "locus-stats",
+                        "--folder",
+                        "global-stats",
+                        "--folder",
+                        "genotype",
+                        "--folder",
+                        "deletion"
                     ]
                 },
                 "Parameters": {
@@ -530,7 +531,7 @@
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Uploaded to S3', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Extracted' AND id in %s;",
-                    "QueryParams.$": "States.Array($.FlattenedSamples)"
+                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
                 }
             },
             "ResultPath": null,
@@ -545,7 +546,7 @@
                     "DbConnection.$": "$.DbConnection",
                     "CalledFunction": "run_query",
                     "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Failed to upload', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Extracted' AND id in %s;",
-                    "QueryParams.$": "States.Array($.FlattenedSamples)"
+                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
                 }
             },
             "ResultPath": null,
