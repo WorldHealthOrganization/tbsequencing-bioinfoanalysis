@@ -560,7 +560,7 @@ module "pipeline_calculate_statistics" {
       LambdaQueryRDS   = module.bioanalysis-QueryRDS.lambda_function_arn
       FargateQueueArn  = module.bioanalysis-queue-fargate.batch_job_queue_arn
       BioPythonFargate = module.batch_job_definition_fargate.batch_job_fargate_definition_arn["${local.prefix}-BioPython-fargate"]
-      StaticBucketArn  = data.aws_ssm_parameter.static_bucket_name
+      StaticBucketArn  = data.aws_ssm_parameter.static_bucket_name.value
   })
 
   logging_configuration = {
