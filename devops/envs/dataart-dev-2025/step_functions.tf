@@ -208,7 +208,14 @@ data "aws_iam_policy_document" "master_pipeline" {
       "ec2:deleteLaunchTemplate",
       "states:ListExecutions",
       "tag:GetResources",
-      "glue:StartJobRun"
+      "glue:StartJobRun",
+      "glue:GetJobRun",
+      "glue:GetJobRuns",
+      "glue:BatchStopJobRun",
+      "glue:GetCrawlerMetrics",
+      "glue:StartCrawler",
+      "glue:GetCrawler",
+      "glue:GetCrawlers"
     ]
     resources = [
       "*",
