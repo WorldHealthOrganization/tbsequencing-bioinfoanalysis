@@ -73,16 +73,16 @@ def main(arguments):
         df.to_csv(outfile, sep="\t", header=True, index=False)
 
         # Upload to S3 with hardcoded path, need to change this to the correct bucket
-        s3_bucket = os.environ["S3_BUCKET"]
+        s3_bucket = os.environ["S3_BUCKET"].rsplit(":", 1)[-1]
         s3_key = "static/media/" + os.path.basename(outfile)
 
         s3_client = boto3.client("s3")
         s3_client.upload_file(outfile, s3_bucket, s3_key)
         print(f"File uploaded to s3://{s3_bucket}/{s3_key}")
     except KeyError as e:
-        print(f"Environment variable not set: {e}")
+        raise(f"Environment variable not set: {e}")
     except Exception as e:
-        print(f"Error saving or uploading file: {e}")
+        raise(f"Error saving or uploading file: {e}")
 
     conn.commit()
     conn.close()
