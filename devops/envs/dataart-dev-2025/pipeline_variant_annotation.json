@@ -421,10 +421,15 @@
                 {
                     "Variable": "$.MountsLifeCycle.State[0]",
                     "StringMatches": "available",
-                    "Next": "parallelPrepareVariantsAndSnpEff"
+                    "Next": "waitMore"
                 }
             ],
             "Default": "waitHalfMinute"
+        },
+        "waitMore": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "parallelPrepareVariantsAndSnpEff"
         },
         "parallelPrepareVariantsAndSnpEff": {
             "Type": "Parallel",
