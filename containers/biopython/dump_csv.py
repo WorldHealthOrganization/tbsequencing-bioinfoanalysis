@@ -8,7 +8,8 @@ WITH RankedAliases AS (
         name,
         ROW_NUMBER() OVER (PARTITION BY sample_id ORDER BY id) as rn
     FROM submission_samplealias
-)
+    WHERE origin = 'BioSample'
+    AND origin_label = 'Sample name'
 SELECT
     ra.name as "sample_aliases_name",
     "genphen_drug"."drug_name",
