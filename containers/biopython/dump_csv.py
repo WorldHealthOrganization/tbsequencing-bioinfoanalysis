@@ -10,6 +10,7 @@ WITH RankedAliases AS (
     FROM submission_samplealias
     WHERE origin = 'BioSample'
     AND origin_label = 'Sample name'
+)
 SELECT
     ra.name as "sample_aliases_name",
     "genphen_drug"."drug_name",
