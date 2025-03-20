@@ -34,7 +34,7 @@ sample = (
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
     )
-    .rename_filed(
+    .rename_field(
         "`id`",
         "sampleid"
     )
