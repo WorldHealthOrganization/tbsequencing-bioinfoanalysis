@@ -507,7 +507,7 @@
                 "SampleId.$": "$.SampleId",
                 "JobQueueArn.$": "$.JobQueueArn",
                 "DbConnection.$": "$.DbConnection",
-                "Result": {
+                "AnalysisStatus": {
                     "Value": "Taxonomy failed"
                 }
             },
