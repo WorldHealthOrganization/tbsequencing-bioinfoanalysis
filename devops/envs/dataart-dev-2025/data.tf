@@ -88,3 +88,7 @@ data "aws_iam_policy" "rds_iam_access" {
 data "aws_ssm_parameter" "sequence_data_bucket_name" {
   name = "/${var.environment}/sequence_data_bucket_name"
 }
+
+data "aws_ssm_parameter" "static_bucket_name" {
+  name = "/${var.environment}/static_bucket_name"
+}
