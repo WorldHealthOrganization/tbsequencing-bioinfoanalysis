@@ -73,7 +73,7 @@ def main(arguments):
         df.to_csv(outfile, sep="\t", header=True, index=False)
 
         # Upload to S3 with hardcoded path, need to change this to the correct bucket
-        s3_bucket = os.environ["S3_BUCKET"]
+        s3_bucket = os.environ["S3_BUCKET"].rsplit(":", 1)[-1]
         s3_key = "static/media/" + os.path.basename(outfile)
 
         s3_client = boto3.client("s3")

@@ -38,7 +38,7 @@
                         },
                         "ExtractDefaults": {
                             "Type": "Pass",
-                            "Next": "prepareReferenceFiles",
+                            "Next": "createFolders",
                             "ResultPath": "$",
                             "Parameters": {
                                 "AssemblyName.$": "$.ParametersWithDefaults.AssemblyName",
@@ -47,7 +47,29 @@
                                 "JobQueueArn.$": "$.ParametersWithDefaults.JobQueueArn",
                                 "DbConnection.$": "$.ParametersWithDefaults.DbConnection"
                             }
-                        },                                
+                        },        
+                        "createFolders": {
+                            "Type":"Task",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "create-folders",
+                                "JobDefinition": "${Samtools}",
+                                "JobQueue.$": "$.JobQueueArn",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "mkdir",
+                                        "genotype",
+                                        "locus-stats",
+                                        "taxonomy-assignment",
+                                        "global-stats",
+                                        "deletion",
+                                        "alignment"
+                                    ]
+                                }
+                            },
+                            "Next":"prepareReferenceFiles"
+                        },                        
                         "prepareReferenceFiles": {
                             "Type": "Task",
                             "Resource": "arn:aws:states:::batch:submitJob.sync",

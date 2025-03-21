@@ -9,6 +9,7 @@ locals {
   pipeline_data_insertion_name       = "insert_processed_data-pipeline"
   pipeline_variant_annotation_name   = "variant_annotation-pipeline"
   pipeline_calculate_statistics_name = "calculate_statistics-pipeline"
+  pipeline_taxonomy_name             = "taxonomy-pipeline"
 
   tags = {
     Project     = var.project_name

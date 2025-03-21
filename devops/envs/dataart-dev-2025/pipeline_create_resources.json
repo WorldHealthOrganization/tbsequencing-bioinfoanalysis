@@ -55,7 +55,7 @@
             },
             "ResultPath": "$.FSx",
             "ResultSelector": {
-                "Name.$": "$.FileSystem.FileSystemId",
+                "Id.$": "$.FileSystem.FileSystemId",
                 "MountName.$": "$.FileSystem.LustreConfiguration.MountName"
             },
             "Next": "formatMimeData"
@@ -63,7 +63,7 @@
         "formatMimeData": {
             "Type": "Pass",
             "Parameters": {
-                "Value.$": "States.Base64Encode(States.Format('MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"==BOUNDARY==\"\n\n--==BOUNDARY==\nContent-Type: text/cloud-config; charset=\"us-ascii\"\n\nruncmd:\n- amazon-linux-extras install -y lustre2.10\n- mkdir -p /scratch/working\n- mount -t lustre -o defaults,noatime,flock,_netdev {}.fsx.${Region}.amazonaws.com@tcp:/{} /scratch/working\n--==BOUNDARY==', $.FSx.Name, $.FSx.MountName))"
+                "Value.$": "States.Base64Encode(States.Format('MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"==BOUNDARY==\"\n\n--==BOUNDARY==\nContent-Type: text/cloud-config; charset=\"us-ascii\"\n\nruncmd:\n- amazon-linux-extras install -y lustre2.10\n- mkdir -p /scratch/working\n- mount -t lustre -o defaults,noatime,flock,_netdev {}.fsx.${Region}.amazonaws.com@tcp:/{} /scratch/working\n--==BOUNDARY==', $.FSx.Id, $.FSx.MountName))"
             },
             "ResultPath": "$.MimeDataBinary",
             "Next": "createLaunchTemplate"
@@ -86,7 +86,7 @@
                     ],
                     "UserData.$": "$.MimeDataBinary.Value"
                 },
-                "LaunchTemplateName.$": "States.Format('${Project}-Filesystem_{}', $.FSx.Name)",
+                "LaunchTemplateName.$": "States.Format('${Project}-Filesystem_{}', $.FSx.Id)",
                 "TagSpecifications": [
                     {
                         "ResourceType": "launch-template",
@@ -100,8 +100,8 @@
                                 "Value": "FSx"
                             },
                             {
-                                "Key": "FSxName",
-                                "Value.$": "$.FSx.Name"
+                                "Key": "FSxId",
+                                "Value.$": "$.FSx.Id"
                             }
                         ]
                     }
@@ -117,7 +117,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::aws-sdk:batch:createComputeEnvironment",
             "Parameters": {
-                "ComputeEnvironmentName.$": "States.Format('${Project}-Filesystem_{}-Template_{}', $.FSx.Name, $.LaunchTemplate.Id)",
+                "ComputeEnvironmentName.$": "States.Format('${Project}-Filesystem_{}-Template_{}', $.FSx.Id, $.LaunchTemplate.Id)",
                 "Type": "MANAGED",
                 "State": "ENABLED",
                 "ServiceRole": "${ServiceRoleArn}",
@@ -140,14 +140,14 @@
                     },
                     "Tags": {
                         "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)",
-                        "FSxName.$": "$.FSx.Name",
+                        "FSxId.$": "$.FSx.Id",
                         "Template.$": "$.LaunchTemplate.Id",
                         "Project": "${Project}"
                     }
                 },
                 "Tags": {
                     "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)",
-                    "FSxName.$": "$.FSx.Name",
+                    "FSxId.$": "$.FSx.Id",
                     "Template.$": "$.LaunchTemplate.Id",
                     "Project": "${Project}"
                 }
@@ -195,7 +195,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::aws-sdk:batch:createJobQueue",
             "Parameters": {
-                "JobQueueName.$": "States.Format('${Project}-{}-Template_{}', $.FSx.Name, $.LaunchTemplate.Id)",
+                "JobQueueName.$": "States.Format('${Project}-{}-Template_{}', $.FSx.Id, $.LaunchTemplate.Id)",
                 "State": "ENABLED",
                 "Priority": 1,
                 "ComputeEnvironmentOrder": [
@@ -207,7 +207,7 @@
                 "Tags": {
                     "Project": "${Project}",
                     "TemplateName.$": "$.LaunchTemplate.Id",
-                    "FSxName.$": "$.FSx.Name",
+                    "FSxId.$": "$.FSx.Id",
                     "Requester.$": "States.Format('StateMachine-{}', $$.Execution.Id)"
                 }
             },
@@ -258,7 +258,7 @@
             "Type": "Task",
             "Resource": "arn:aws:states:::aws-sdk:fsx:describeFileSystems",
             "Parameters": {
-                "FileSystemIds.$": "States.Array($.FSx.Name)"
+                "FileSystemIds.$": "States.Array($.FSx.Id)"
             },
             "ResultPath": "$.FSxStatus",
             "ResultSelector": {
@@ -287,8 +287,7 @@
             "Parameters": {
                 "JobQueueArn.$": "$.JobQueue.Arn",
                 "ComputeEnvArn.$": "$.ComputeEnvironment.Arn",
-                "FSxName.$": "$.FSx.Name",
-                "FSxId.$": "$.FSx.Name",
+                "FSxId.$": "$.FSx.Id",
                 "LaunchTemplateId.$": "$.LaunchTemplate.Id"
             }
         }

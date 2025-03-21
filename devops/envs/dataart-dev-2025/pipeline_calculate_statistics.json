@@ -205,7 +205,7 @@
                     "Environment": [
                         {
                             "Name": "S3_BUCKET",
-                            "Value": "static-files-dataart-dev-2025-main-fd20250108095348701500000003"
+                            "Value": "${StaticBucketArn}"
                         }
                     ],
                     "ResourceRequirements": [

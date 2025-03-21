@@ -739,7 +739,9 @@
                     "Command": [
                         "/scripts/export_to_s3.py",
                         "--output_bucket",
-                        "Ref::OutputBucket"
+                        "Ref::OutputBucket",
+                        "--folder",
+                        "taxonomy_analysis"
                     ]
                 },
                 "Parameters": {

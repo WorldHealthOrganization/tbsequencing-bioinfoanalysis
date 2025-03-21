@@ -5,14 +5,11 @@ import argparse
 import os
 
 
-FOLDERS_TO_EXPORT = ["genotype", "global-stats", "locus-stats", "deletion", "taxonomy-assignment", "alignment"]
-
-
 def main(args):
     bucket_name = args.output_bucket
     s3 = boto3.client('s3')
 
-    for folder_name in FOLDERS_TO_EXPORT:
+    for folder_name in args.folder:
         try:
             os.chdir(f"/scratch/{folder_name}")
             for i in os.listdir():
@@ -28,6 +25,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_bucket")
+    parser.add_argument("-f", "--folder", action="append")
     args = parser.parse_args()
 
     main(args)

@@ -36,6 +36,10 @@ sample = (
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
     )
+    .rename_field(
+        "`id`",
+        "sampleid"
+    )
 )
 
 datasource0 = (
@@ -46,7 +50,7 @@ datasource0 = (
     )
     .join(
         ["sampleid"],
-        ["id"],
+        ["sampleid"],
         sample
     )
 )

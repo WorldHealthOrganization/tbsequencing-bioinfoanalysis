@@ -15,8 +15,8 @@
                             "Parameters": {
                                 "Filters": [
                                     {
-                                        "Name": "tag:FSxName",
-                                        "Values.$": "States.Array($.FSxName)"
+                                        "Name": "tag:FSxId",
+                                        "Values.$": "States.Array($.FSxId)"
                                     }
                                 ]
                             },
@@ -42,7 +42,7 @@
                             "Type": "Task",
                             "Resource": "arn:aws:states:::aws-sdk:fsx:deleteFileSystem",
                             "Parameters": {
-                                "FileSystemId.$": "$.FSxName"
+                                "FileSystemId.$": "$.FSxId"
                             },
                             "ResultPath": null,
                             "End": true
@@ -58,8 +58,8 @@
                             "Parameters": {
                                 "TagFilters": [
                                     {
-                                        "Key": "FSxName",
-                                        "Values.$": "States.Array($.FSxName)"
+                                        "Key": "FSxId",
+                                        "Values.$": "States.Array($.FSxId)"
                                     }
                                 ],
                                 "ResourceTypeFilters": [
@@ -78,8 +78,8 @@
                             "Parameters": {
                                 "TagFilters": [
                                     {
-                                        "Key": "FSxName",
-                                        "Values.$": "States.Array($.FSxName)"
+                                        "Key": "FSxId",
+                                        "Values.$": "States.Array($.FSxId)"
                                     }
                                 ],
                                 "ResourceTypeFilters": [
