@@ -195,7 +195,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "FailEnd"
+                    "Next": "deleteResources"
                 }
             ],
             "ResultSelector": {
@@ -229,18 +229,18 @@
                 "StateMachineArn": "${WorkflowPrepareReferencesArn}",
                 "Input.$": "$"
             },
-            "Next": "TaxonomyAnalysis",
+            "Next": "sampleAnalysis",
             "Catch": [
                 {
                     "ErrorEquals": [
                         "States.ALL"
                     ],
                     "ResultPath": "$.Error",
-                    "Next": "DeleteResources"
+                    "Next": "deleteResources"
                 }
             ]
         },
-        "TaxonomyAnalysis": {
+        "sampleAnalysis": {
             "Type": "Map",
             "MaxConcurrencyPath": "$.Concurrency",
             "ResultPath": null,
@@ -264,14 +264,14 @@
                     "Mode": "DISTRIBUTED",
                     "ExecutionType": "STANDARD"
                 },
-                "StartAt": "SampleTaxonomyAnalysis",
+                "StartAt": "perSampleAnalysis",
                 "States": {
-                    "SampleTaxonomyAnalysis": {
+                    "perSampleAnalysis": {
                         "Type": "Task",
                         "Resource": "arn:aws:states:::states:startExecution.sync",
                         "ResultPath": null,
                         "Parameters": {
-                            "StateMachineArn": "${WorkflowTaxonomyArn}",
+                            "StateMachineArn": "${WorkflowVariantCallingArn}",
                             "Input": {
                                 "SampleId.$": "$.SampleId",
                                 "JobQueueArn.$": "$.JobQueueArn",
@@ -302,9 +302,18 @@
                     }
                 }
             },
-            "Next": "uploadTaxonomyToS3"
+            "Next": "passSuccesState"
         },
-        "uploadTaxonomyToS3": {
+        "passSuccesState": {
+            "Type": "Pass",
+            "Result": {
+                "Value": "Succeeded"
+            },
+            "ResultPath": "$.ExtractionStatus",
+            "Next": "uploadResultsToS3"
+        },
+
+        "uploadResultsToS3": {
             "Type": "Task",
             "Resource": "arn:aws:states:::batch:submitJob.sync",
             "ResultPath": null,
@@ -318,152 +327,47 @@
                         "--output_bucket",
                         "Ref::OutputBucket",
                         "--folder",
-                        "taxonomy-assignment"
+                        "taxonomy-assignment",
+                        "--folder",
+                        "locus-stats",
+                        "--folder",
+                        "global-stats",
+                        "--folder",
+                        "genotype",
+                        "--folder",
+                        "deletion"
                     ]
                 },
                 "Parameters": {
                     "OutputBucket.$": "$.OutputBucket"
                 }
             },
-            "Next": "insertTaxonomy"
-        },
-
-        "insertTaxonomy": {
-            "Type": "Task",
-            "Resource": "arn:aws:states:::glue:startJobRun.sync",
-            "ResultPath": null,
-            "Parameters": {
-                "JobName": "${GlueTaxonomyJobName}"
-            },
-            "Next": "updateSampleStatusTaxonomyInserted"
-        },
-        "updateSampleStatusTaxonomyInserted": {
-            "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${LambdaQueryRDS}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Taxonomy inserted', bioanalysis_status_changed_at=now() \n WHERE  bioanalysis_status = 'Taxonomy succeeded' and id in %s;" ,
-                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
-
-                }
-            },
-            "ResultPath": null,
-            "Next": "getSamplesTaxonomySucceeded"
-        },
-        "getSamplesTaxonomySucceeded":{
-            "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${LambdaQueryRDS}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "WITH taxosucceeded AS (SELECT distinct id sampleid FROM submission_sample WHERE bioanalysis_status = 'Taxonomy inserted' and id in %s) SELECT '{\"Ids\":['||string_agg(taxosucceeded.sampleid::text, ',')||']}' FROM taxosucceeded;",
-                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
-                }
-            },
-            "ResultPath": "$.Samples",
-            "ResultSelector": {
-                "Value.$": "$.Payload"
-            },
-            "Next": "checkForSamplesTaxoSucceeded"
-
-        },
-        "checkForSamplesTaxoSucceeded": {
-            "Type": "Choice",
-            "Choices": [
+            "Next": "UpdateStatus",
+            "Catch": [
                 {
-                    "Variable": "$.Samples.Value[0][0]",
-                    "IsNull": true,
-                    "Next": "NoSampleToProcess"
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateStatusFailed"
                 }
-            ],
-            "Default": "formatSampleArrayAgain"
+            ]
         },
-        "formatSampleArrayAgain": {
-            "Type": "Pass",
-            "Next": "variantAnalysis",
+        "UpdateStatus": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-                "List.$": "States.StringToJson($.Samples.Value[0][0])"
+                "FunctionName": "${LambdaQueryRDS}",
+                "Payload": {
+                    "DbConnection.$": "$.DbConnection",
+                    "CalledFunction": "run_query",
+                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Uploaded to S3', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Extracted' AND id in %s;",
+                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
+                }
             },
-            "ResultPath": "$.Samples"
-        },
-        "variantAnalysis": {
-            "Type": "Map",
-            "MaxConcurrencyPath": "$.Concurrency",
             "ResultPath": null,
-            "ToleratedFailurePercentage": 100,
-            "ItemsPath": "$.Samples.List.Ids",
-            "Parameters": {
-                "SampleId.$": "$$.Map.Item.Value",
-                "JobQueueArn.$": "$.JobQueueArn",
-                "DbConnection.$": "$.DbConnection",
-                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                "AssemblyName.$": "$.AssemblyName",
-                "NucleotideAccession.$": "$.NucleotideAccession",
-                "KrakenDbName.$": "$.KrakenDbName",
-                "FSxId.$": "$.FSxId",
-                "LaunchTemplateId.$": "$.LaunchTemplateId",
-                "ComputeEnvArn.$": "$.ComputeEnvArn",
-                "OutputBucket.$": "$.OutputBucket"
-            },
-            "ItemProcessor": {
-                "ProcessorConfig": {
-                    "Mode": "DISTRIBUTED",
-                    "ExecutionType": "STANDARD"
-                },
-                "StartAt": "SampleVariantAnalysis",
-                "States": {
-                    "SampleVariantAnalysis": {
-                        "Type": "Task",
-                        "Resource": "arn:aws:states:::states:startExecution.sync",
-                        "ResultPath": null,
-                        "Parameters": {
-                            "StateMachineArn": "${WorkflowVariantCallingArn}",
-                            "Input": {
-                                "SampleId.$": "$.SampleId",
-                                "JobQueueArn.$": "$.JobQueueArn",
-                                "DbConnection.$": "$.DbConnection",
-                                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                                "AssemblyName.$": "$.AssemblyName",
-                                "NucleotideAccession.$": "$.NucleotideAccession",
-                                "KrakenDbName.$": "$.KrakenDbName"
-                            },
-                            "Name.$": "States.Format('{}_{}', $.SampleId, $$.Execution.Name)"
-                        },
-                        "Next": "OverrideSampleVariantAnalysis",
-                        "Catch": [
-                            {
-                                "ErrorEquals": [
-                                    "States.ALL"
-                                ],
-                                "Next": "OverrideSampleVariantAnalysis"
-                            }
-                        ]
-                    },
-                    "OverrideSampleVariantAnalysis": {
-                        "Type": "Pass",
-                        "Parameters": null,
-                        "OutputPath": null,
-                        "ResultPath": "$",
-                        "End": true
-                    }
-                }
-            },
-            "Next": "Success"
+            "Next": "deleteResources"
         },
-        "Success": {
-            "Type": "Pass",
-            "Result": {
-                "Value": "Succeeded"
-            },
-            "ResultPath": "$.ExtractionStatus",
-            "Next": "UploadToS3"
-        },
-        "DeleteResources": {
+        "deleteResources": {
             "Type": "Task",
             "Resource": "arn:aws:states:::states:startExecution.sync",
             "ResultPath": null,
@@ -480,62 +384,18 @@
                         "States.ALL"
                     ],
                     "ResultPath": "$.Error",
-                    "Next": "FailEnd"
+                    "Next": "ChoiceExtractionStatus"
                 }
             ]
         },
-        "UploadToS3": {
+        "insertTaxonomy": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
             "ResultPath": null,
             "Parameters": {
-                "JobName": "upload-to-s3",
-                "JobDefinition": "${BioPython}",
-                "JobQueue.$": "$.JobQueueArn",
-                "ContainerOverrides": {
-                    "Command": [
-                        "/scripts/export_to_s3.py",
-                        "--output_bucket",
-                        "Ref::OutputBucket",
-                        "--folder",
-                        "locus-stats",
-                        "--folder",
-                        "global-stats",
-                        "--folder",
-                        "genotype",
-                        "--folder",
-                        "deletion"
-                    ]
-                },
-                "Parameters": {
-                    "OutputBucket.$": "$.OutputBucket"
-                }
+                "JobName": "${GlueTaxonomyJobName}"
             },
-            "Catch": [
-                {
-                    "ErrorEquals": [
-                        "States.ALL"
-                    ],
-                    "ResultPath": "$.error",
-                    "Next": "UpdateStatusFailed"
-                }
-            ],
-            "Next": "UpdateStatus"
-        },
-        "UpdateStatus": {
-            "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${LambdaQueryRDS}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Uploaded to S3', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Extracted' AND id in %s;",
-                    "QueryParams.$": "States.Array($.Samples.List.Ids)"
-                }
-            },
-            "ResultPath": null,
-            "Next": "DeleteResources"
+            "Next": "DataInsertionExecution"
         },
         "UpdateStatusFailed": {
             "Type": "Task",
@@ -561,7 +421,7 @@
                     "Next": "FailEnd"
                 }
             ],
-            "Default": "DataInsertionExecution"
+            "Default": "insertTaxonomy"
         },
         "DataInsertionExecution": {
             "Type": "Task",
