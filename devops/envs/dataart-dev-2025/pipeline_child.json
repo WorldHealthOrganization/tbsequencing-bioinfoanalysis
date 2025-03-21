@@ -640,9 +640,9 @@
                 }
             },
             "ResultPath": "$",
-            "Next": "WaitThirtySeconds"
+            "Next": "waitThirtySeconds"
         },
-        "WaitThirtySeconds": {
+        "waitThirtySeconds": {
             "Type": "Wait",
             "Seconds": 30,
             "Next": "CleanAnalysis"
@@ -1294,7 +1294,7 @@
                         "States.ALL"
                     ],
                     "ResultPath": null,
-                    "Next": "WaitThirtySeconds"
+                    "Next": "passFailStatus"
                 }
             ],
             "Next": "passSuccessStatus"
