@@ -34,7 +34,11 @@ sample = (
         table_name=dbname + "_public_submission_sample"
     )
     .filter(
-        f=lambda x: x["bioanalysis_status"]=="Taxonomy succeeded"
+        f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
+    )
+    .rename_field(
+        "`id`",
+        "sampleid"
     )
 )
 
@@ -46,7 +50,7 @@ datasource0 = (
     )
     .join(
         ["sampleid"],
-        ["id"],
+        ["sampleid"],
         sample
     )
 )
