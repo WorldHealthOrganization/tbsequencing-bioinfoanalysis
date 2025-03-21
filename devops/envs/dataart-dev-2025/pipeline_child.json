@@ -116,11 +116,12 @@
                     "Next": "passFailStatus"
                 }
             ],
-            "Default": "iterateLibraries"
+            "Default": "IterateLibraries"
         },
-        "iterateLibraries": {
+        "IterateLibraries": {
             "Type": "Map",
             "MaxConcurrency": 50,
+            "ResultPath": "$",
             "OutputPath": "$[0]",
             "ItemsPath": "$.LibraryIds.Value",
             "Parameters": {
@@ -170,13 +171,9 @@
                             "Id.$": "States.Format('lib_{}', $.SampleId)"
                         },
                         "ResultPath": "$.FastqId",
-                        "Next": "FixJSON"
+                        "Next": "FixJson"
                     },
-                    "failUnknownLocation": {
-                        "Type": "Fail"
-                    },
-
-                    "FixJSON": {
+                    "FixJson": {
                         "Type": "Pass",
                         "InputPath": "$.FastqId.Id",
                         "ResultPath": "$.FastqId",
@@ -213,7 +210,7 @@
                             "R2Suffix": "R2.fastq.gz"
                         },
                         "ResultPath": "$.Reads",
-                        "Next": "ParallelFastQC"
+                        "Next": "iterateCopyReadsFromTbKb"
                     },
                     "externalFastqPass": {
                         "Type": "Pass",
@@ -222,6 +219,151 @@
                             "R2Suffix": "2.fastq"
                         },
                         "ResultPath": "$.Reads",
+                        "Next": "choiceDownloadProtocol"
+                    },
+                    "choiceDownloadProtocol": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.Location",
+                                "StringEquals": "NCBI",
+                                "Next": "copyNcbiSraFromS3"
+                            },
+                            {
+                                "Variable": "$.Location",
+                                "StringEquals": "CNCB",
+                                "Next": "DownloadReadsFromCncb"
+                            }
+                        ],
+                        "Default": "failUnknownLocation"
+                    },
+                    "DownloadReadsFromCncb": {
+                        "Type": "Map",
+                        "ResultPath": null,
+                        "ItemsPath": "$.SequencingFile.FilePath",
+                        "Parameters": {
+                            "SampleId.$": "$.SampleId",
+                            "FastqPath.$": "$$.Map.Item.Value",
+                            "FastqId.$": "$.FastqId",
+                            "ReadNum.$": "States.MathAdd($$.Map.Item.Index, 1)",
+                            "JobDefEdgeTurbo": "${Samtools}",
+                            "BatchQueue.$": "$.JobQueueArn"
+                        },
+                        "Next": "ParallelFastQC",
+                        "Iterator": {
+                            "StartAt": "DownloadReadByFtp",
+                            "States": {
+                                "DownloadReadByFtp": {
+                                    "Type": "Task",
+                                    "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                    "Parameters": {
+                                        "JobName": "edge-turbo",
+                                        "JobDefinition.$": "$.JobDefEdgeTurbo",
+                                        "JobQueue.$": "$.BatchQueue",
+                                        "ContainerOverrides": {
+                                            "ResourceRequirements": [
+                                                {
+                                                    "Type": "VCPU",
+                                                    "Value": "1"
+                                                },
+                                                {
+                                                    "Type": "MEMORY",
+                                                    "Value": "4000"
+                                                }
+                                            ],
+                                            "Command": [
+                                                "/bin/bash",
+                                                "-c",
+                                                "Ref::COMMAND"
+                                            ]
+                                        },
+                                        "Parameters": {
+                                            "COMMAND.$": "States.Format('mkdir -p {}/ && cd {}/ && wget -qO- {} | gzip -d > {}_{}.fastq', $.SampleId, $.SampleId, $.FastqPath, $.FastqId, $.ReadNum)"
+                                        }
+                                    },
+                                    "Retry": [
+                                        {
+                                            "ErrorEquals": [
+                                                "Batch.AWSBatchException"
+                                            ],
+                                            "IntervalSeconds": 5,
+                                            "MaxAttempts": 10,
+                                            "BackoffRate": 2
+                                        }
+                                    ],
+                                    "End": true
+                                }
+                            }
+                        }
+                    },
+                    "failUnknownLocation": {
+                        "Type": "Fail"
+                    },
+                    "copyNcbiSraFromS3": {
+                        "Type": "Task",
+                        "ResultPath": null,
+                        "Resource": "arn:aws:states:::batch:submitJob.sync",
+                        "Parameters": {
+                            "JobName": "CopyReadsFromS3",
+                            "JobDefinition": "${BioPython}",
+                            "JobQueue.$": "$.JobQueueArn",
+                            "ContainerOverrides": {
+                                "Command": [
+                                    "/scripts/copy_fastq_from_s3.py",
+                                    "--fastq_id",
+                                    "Ref::FASTQ_ID",
+                                    "--sample_id",
+                                    "Ref::SAMPLE_ID"
+                                ]
+                            },
+                            "Parameters": {
+                                "FASTQ_ID.$": "$.FastqId",
+                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)"
+                            }
+                        },
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Batch.AWSBatchException"
+                                ],
+                                "IntervalSeconds": 5,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Next": "normalizeSra"
+                    },
+                    "normalizeSra": {
+                        "Type": "Task",
+                        "ResultPath": null,
+                        "Resource": "arn:aws:states:::batch:submitJob.sync",
+                        "Parameters": {
+                            "JobName": "fasterq-dump",
+                            "JobDefinition": "${Sratools}",
+                            "JobQueue.$": "$.JobQueueArn",
+                            "ContainerOverrides": {
+                                "Command": [
+                                    "/bin/bash",
+                                    "/scripts/normalized_to_fastq.sh",
+                                    "Ref::SAMPLE_ID",
+                                    "Ref::FASTQ_ID"
+                                ]
+                            },
+                            "Parameters": {
+                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
+                                "FASTQ_ID.$": "$.FastqId"
+                            }
+                        },
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Batch.AWSBatchException"
+                                ],
+                                "IntervalSeconds": 5,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
                         "Next": "ParallelFastQC"
                     },
                     "ParallelFastQC": {
@@ -412,6 +554,68 @@
                             }
                         ],
                         "End": true
+                    },
+                    "iterateCopyReadsFromTbKb": {
+                        "Type": "Map",
+                        "MaxConcurrency": 50,
+                        "ResultPath": null,
+                        "ItemsPath": "$.SequencingFile.FilePath",
+                        "Parameters": {
+                            "SampleId.$": "$.SampleId",
+                            "FastqPath.$": "$$.Map.Item.Value",
+                            "Index.$": "$$.Map.Item.Index",
+                            "FastqId.$": "$.FastqId",
+                            "JobQueueArn.$": "$.JobQueueArn"
+                        },
+                        "Next": "ParallelFastQC",
+                        "Iterator": {
+                            "StartAt": "copyReadsFromTbKb",
+                            "States": {
+                                "copyReadsFromTbKb": {
+                                    "Type": "Task",
+                                    "ResultPath": null,
+                                    "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                    "Parameters": {
+                                        "JobName": "CopyReadsFromS3",
+                                        "JobDefinition": "${BioPython}",
+                                        "JobQueue.$": "$.JobQueueArn",
+                                        "ContainerOverrides": {
+                                            "Command": [
+                                                "/scripts/copy_fastq_from_s3.py",
+                                                "--fastq_path",
+                                                "Ref::FASTQ_PATH",
+                                                "--fastq_id",
+                                                "Ref::FASTQ_ID",
+                                                "--sample_id",
+                                                "Ref::SAMPLE_ID",
+                                                "--index",
+                                                "Ref::INDEX",
+                                                "--bucket",
+                                                "Ref::BUCKET"
+                                            ]
+                                        },
+                                        "Parameters": {
+                                            "FASTQ_PATH.$": "$.FastqPath",
+                                            "FASTQ_ID.$": "$.FastqId",
+                                            "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
+                                            "INDEX.$": "States.Format('{}', $.Index)",
+                                            "BUCKET": "${sequenceDataBucket}"
+                                        }
+                                    },
+                                    "Retry": [
+                                        {
+                                            "ErrorEquals": [
+                                                "Batch.AWSBatchException"
+                                            ],
+                                            "IntervalSeconds": 5,
+                                            "MaxAttempts": 10,
+                                            "BackoffRate": 2
+                                        }
+                                    ],
+                                    "End": true
+                                }
+                            }
+                        }
                     }
                 }
             },
@@ -420,7 +624,55 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "Next": "PrepParams",
+                    "Next": "passFailStatus",
+                    "ResultPath": null
+                }
+            ]
+        },
+        "passFailStatus": {
+            "Type": "Pass",
+            "Parameters": {
+                "SampleId.$": "$.SampleId",
+                "JobQueueArn.$": "$.JobQueueArn",
+                "DbConnection.$": "$.DbConnection",
+                "AnalysisStatus": {
+                    "Value": "Failed to extract"
+                }
+            },
+            "ResultPath": "$",
+            "Next": "WaitThirtySeconds"
+        },
+        "WaitThirtySeconds": {
+            "Type": "Wait",
+            "Seconds": 30,
+            "Next": "CleanAnalysis"
+        },
+        "CleanAnalysis": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+                "JobName": "clean-all",
+                "JobDefinition": "${Samtools}",
+                "JobQueue.$": "$.JobQueueArn",
+                "ContainerOverrides": {
+                    "Command": [
+                        "/bin/bash",
+                        "-c",
+                        "Ref::COMMAND"
+                    ]
+                },
+                "Parameters": {
+                    "COMMAND.$": "States.Format('rm -rf {}/ */{}-* taxonom-analysis/{}-*', $.SampleId, $.SampleId, $.SampleId)"
+                }
+            },
+            "Next": "UpdateStatus",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "UpdateStatus",
                     "ResultPath": null
                 }
             ]
@@ -963,6 +1215,72 @@
                                             "End": true
                                         }
                                     }
+                                },
+                                {
+                                    "StartAt": "Kraken",
+                                    "States": {
+                                        "Kraken": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "kraken",
+                                                "JobDefinition": "${Kraken}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/bin/bash",
+                                                        "-c",
+                                                        "Ref::COMMAND"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "COMMAND.$": "States.Format('kraken2 --db references/{} --threads 1 --report {}/{}-kraken.txt --paired {}/*.f*q* > {}/{}-kraken-full.txt', $.KrakenDbName, $.SampleId, $.SampleId, $.SampleId, $.SampleId, $.SampleId)"
+                                                }
+                                            },
+                                            "Retry": [
+                                                {
+                                                    "ErrorEquals": [
+                                                        "Batch.AWSBatchException"
+                                                    ],
+                                                    "IntervalSeconds": 5,
+                                                    "MaxAttempts": 10,
+                                                    "BackoffRate": 2
+                                                }
+                                            ],
+                                            "Next": "PrepareKraken"
+                                        },
+                                        "PrepareKraken": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "prepare-kraken",
+                                                "JobDefinition": "${BioPython}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/format_taxonomy_assignment.py",
+                                                        "Ref::FILE"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "FILE.$": "States.Format('{}/{}', $.SampleId, $.SampleId)"
+                                                }
+                                            },
+                                            "Retry": [
+                                                {
+                                                    "ErrorEquals": [
+                                                        "Batch.AWSBatchException"
+                                                    ],
+                                                    "IntervalSeconds": 5,
+                                                    "MaxAttempts": 10,
+                                                    "BackoffRate": 2
+                                                }
+                                            ],
+                                            "End": true
+                                        }
+                                    }
                                 }
                             ],
                             "End": true
@@ -979,80 +1297,9 @@
                     "Next": "WaitThirtySeconds"
                 }
             ],
-            "Next": "Success"
+            "Next": "passSuccessStatus"
         },
-        "PrepParams": {
-            "Type": "Pass",
-            "Parameters": {
-                "SampleId.$": "$.SampleId",
-                "JobQueueArn.$": "$.JobQueueArn",
-                "RefseqAssemblyAccession.$": "$.RefseqAssemblyAccession",
-                "AssemblyName.$": "$.AssemblyName",
-                "DbConnection.$": "$.DbConnection",
-                "ReferenceName.$": "States.Format('{}_{}', $.RefseqAssemblyAccession, $.AssemblyName)",
-                "NucleotideAccession.$": "$.NucleotideAccession",
-                "KrakenDbName.$": "$.KrakenDbName"
-            },
-            "ResultPath": "$",
-            "Next": "WaitThirtySeconds"
-        },
-        "passFailStatus": {
-            "Type": "Pass",
-            "Parameters": {
-                "SampleId.$": "$.SampleId",
-                "JobQueueArn.$": "$.JobQueueArn",
-                "DbConnection.$": "$.DbConnection",
-                "Result": {
-                    "Value": "Failed to extract"
-                }
-            },
-            "ResultPath": "$",
-            "Next": "WaitThirtySeconds"
-        },
-        "WaitThirtySeconds": {
-            "Type": "Wait",
-            "Seconds": 30,
-            "Next": "CleanAnalysis"
-        },
-        "CleanAnalysis": {
-            "Type": "Task",
-            "ResultPath": null,
-            "Resource": "arn:aws:states:::batch:submitJob.sync",
-            "Parameters": {
-                "JobName": "clean-all",
-                "JobDefinition": "${Samtools}",
-                "JobQueue.$": "$.JobQueueArn",
-                "ContainerOverrides": {
-                    "Command": [
-                        "/bin/bash",
-                        "-c",
-                        "Ref::COMMAND"
-                    ]
-                },
-                "Parameters": {
-                    "COMMAND.$": "States.Format('rm -rf {}/ */{}-*', $.SampleId, $.SampleId)"
-                }
-            },
-            "Next": "Fail",
-            "Catch": [
-                {
-                    "ErrorEquals": [
-                        "States.ALL"
-                    ],
-                    "Next": "Fail",
-                    "ResultPath": null
-                }
-            ]
-        },
-        "Fail": {
-            "Type": "Pass",
-            "Result": {
-                "Value": "Failed to extract"
-            },
-            "ResultPath": "$.AnalysisStatus",
-            "Next": "UpdateStatus"
-        },
-        "Success": {
+        "passSuccessStatus": {
             "Type": "Pass",
             "Result": {
                 "Value": "Extracted"
