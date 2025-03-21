@@ -54,3 +54,7 @@ data "aws_security_group" "glue" {
 data "aws_iam_role" "ecs_task_role" {
   name = "${var.project_name}-ncbi-${var.environment}-ecs_fargate_task_execution_role"
 }
+
+data "aws_ssm_parameter" "static_files_bucket_name" {
+  name = "/${var.environment}/static_files_bucket_name"
+}

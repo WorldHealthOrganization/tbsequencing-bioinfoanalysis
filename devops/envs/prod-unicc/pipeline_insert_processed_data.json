@@ -124,7 +124,7 @@
                                 "Next": "RunCrawler"
                             }
                         ],
-                        "Default": "GetTablesCreated"
+                        "Default": "EndCrawler"
                     },
                     "RunCrawler": {
                         "Type": "Task",
@@ -168,26 +168,6 @@
                                 "Next": "WaitThirtySeconds"
                             }
                         ]
-                    },
-                    "GetTablesCreated": {
-                        "Type": "Task",
-                        "Resource": "arn:aws:states:::aws-sdk:glue:getCrawlerMetrics",
-                        "Parameters": {
-                            "CrawlerNameList.$": "States.Array($.CrawlerName)"
-                        },
-                        "ResultPath": "$.CrawlerTablesCreated",
-                        "Next": "CheckTablesCreated"
-                    },
-                    "CheckTablesCreated": {
-                        "Type": "Choice",
-                        "Choices": [
-                            {
-                                "Variable": "$.CrawlerTablesCreated.CrawlerMetricsList[0].TablesCreated",
-                                "NumericEquals": 0,
-                                "Next": "RunCrawler"
-                            }
-                        ],
-                        "Default": "EndCrawler"
                     },
                     "EndCrawler": {
                         "Type": "Pass",
@@ -326,7 +306,7 @@
                                             "ResultPath": null,
                                             "Parameters": {
                                                 "JobName": "${GlueDelVariantsJobName}",
-                                                "NumberOfWorkers": 5,
+                                                "NumberOfWorkers": 2,
                                                 "WorkerType": "G.1X"
                                             },
                                             "Next": "insertGenotypesFargate"
