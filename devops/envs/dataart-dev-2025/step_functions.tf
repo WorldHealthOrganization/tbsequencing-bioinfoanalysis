@@ -42,40 +42,6 @@ module "pipeline_child" {
   }
 }
 
-module "pipeline_taxonomy" {
-  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
-
-  name              = "${local.prefix}-${local.pipeline_taxonomy_name}"
-  create_role       = true
-  use_existing_role = false
-  role_name         = format("%s-taxonmy-pipeline-role", substr("${local.prefix}", 0, 43))
-  type              = "standard"
-  definition = templatefile("pipeline_taxonomy.json",
-    {
-      BioPython = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
-      Kraken    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Kraken"]
-      Sratools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Sratools"]
-      Samtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
-
-      LambdaQueryRDS     = module.bioanalysis-QueryRDS.lambda_function_arn
-      sequenceDataBucket = data.aws_ssm_parameter.sequence_data_bucket_name.value
-  })
-
-
-  logging_configuration = {
-    include_execution_data = true
-    level                  = "ALL"
-  }
-
-  attach_policy_json = true
-  policy_json        = data.aws_iam_policy_document.child_pipeline.json
-
-  tags = {
-    Name = "${local.prefix}-taxonomy-pipeline-module"
-  }
-}
-
-
 data "aws_iam_policy_document" "child_pipeline" {
   version = "2012-10-17"
   statement {
@@ -114,7 +80,6 @@ module "pipeline_master" {
       Gatk                            = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
       LambdaQueryRDS                  = module.bioanalysis-QueryRDS.lambda_function_arn
       WorkflowVariantCallingArn       = module.pipeline_child.state_machine_arn
-      WorkflowTaxonomyArn             = module.pipeline_taxonomy.state_machine_arn
       WorkflowDataInsertionArn        = module.pipeline_insert_processed_data.state_machine_arn
       WorkflowVariantAnnotationArn    = module.pipeline_variant_annotation.state_machine_arn
       WorkflowStatsCalculationArn     = module.pipeline_calculate_statistics.state_machine_arn
