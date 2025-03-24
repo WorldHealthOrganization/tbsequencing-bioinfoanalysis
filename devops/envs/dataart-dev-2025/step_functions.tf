@@ -74,11 +74,9 @@ module "pipeline_master" {
   type              = "standard"
   definition = templatefile("pipeline_master.json",
     {
-      BioPython                       = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
-      Bwa                             = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bwa"]
-      Samtools                        = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
-      Gatk                            = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
-      LambdaQueryRDS                  = module.bioanalysis-QueryRDS.lambda_function_arn
+      BioPython      = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
+      LambdaQueryRDS = module.bioanalysis-QueryRDS.lambda_function_arn
+
       WorkflowVariantCallingArn       = module.pipeline_child.state_machine_arn
       WorkflowDataInsertionArn        = module.pipeline_insert_processed_data.state_machine_arn
       WorkflowVariantAnnotationArn    = module.pipeline_variant_annotation.state_machine_arn
@@ -86,19 +84,12 @@ module "pipeline_master" {
       WorkflowFSxResourcesCreationArn = module.create_resources.state_machine_arn
       WorkflowPrepareReferencesArn    = module.prepare_references.state_machine_arn
       WorkflowFSxResourcesDeletionArn = module.delete_resources.state_machine_arn
-      OutputBucket                    = module.s3_for_fsx.bucket_id["fsx-export"]
-      LambdaQueryRDS                  = module.bioanalysis-QueryRDS.lambda_function_arn
-      InstanceProfileRoleArn          = aws_iam_instance_profile.aws_iam_instance_profile.arn
-      ServiceRoleArn                  = aws_iam_role.batch_service_role.arn
-      SecurityGroupId                 = data.aws_security_group.batch-compute.id
 
-      Project      = local.prefix
-      FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
-      AccountId    = local.account_id
-      Region       = local.aws_region
+      OutputBucket = module.s3_for_fsx.bucket_id["fsx-export"]
 
-      FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
-      EC2QueueArn     = module.bioanalysis-queue-ec2.batch_job_queue_arn
+      Project   = local.prefix
+      AccountId = local.account_id
+      Region    = local.aws_region
 
       DbHost     = data.aws_ssm_parameter.db_host.value
       DbName     = data.aws_ssm_parameter.db_name.value
@@ -106,13 +97,7 @@ module "pipeline_master" {
       DbPassword = "RDS"
       DbPort     = "5432"
 
-      GlueGenotypeJobName      = module.glue.glue_job_name["genotype"]
-      GlueDellyGenotypeJobName = module.glue.glue_job_name["deletion"]
-      GlueDelVariantsJobName   = module.glue.glue_job_name["del_variants"]
-      GlueJoinGenotypeJobName  = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName      = module.glue.glue_job_name["taxonomy_assignment"]
-      GlueLocusStatsJobName    = module.glue.glue_job_name["locus_stats"]
-      GlueGlobalStatsJobName   = module.glue.glue_job_name["global_stats"]
+      GlueTaxonomyJobName = module.glue.glue_job_name["taxonomy_assignment"]
 
   })
 
@@ -223,45 +208,22 @@ module "prepare_references" {
   type              = "standard"
   definition = templatefile("pipeline_prepare_references.json",
     {
-      BioPython                    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
-      Bwa                          = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bwa"]
-      Samtools                     = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
-      Gatk                         = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
-      GetSamples                   = module.bioanalysis-QueryRDS.lambda_function_arn
-      PrepareSamples               = module.bioanalysis-QueryRDS.lambda_function_arn
-      UpdateStatus                 = module.bioanalysis-QueryRDS.lambda_function_arn
-      WorkflowVariantCallingArn    = module.pipeline_child.state_machine_arn
-      WorkflowDataInsertionArn     = module.pipeline_insert_processed_data.state_machine_arn
-      WorkflowVariantAnnotationArn = module.pipeline_variant_annotation.state_machine_arn
-      WorkflowStatsCalculationArn  = module.pipeline_calculate_statistics.state_machine_arn
-      OutputBucket                 = module.s3_for_fsx.bucket_id["fsx-export"]
-      LambdaQueryRDS               = module.bioanalysis-QueryRDS.lambda_function_arn
-      InstanceProfileRoleArn       = aws_iam_instance_profile.aws_iam_instance_profile.arn
-      ServiceRoleArn               = aws_iam_role.batch_service_role.arn
-      SecurityGroupId              = data.aws_security_group.batch-compute.id
-      SubnetId                     = var.low_cost_implementation ? data.aws_subnets.public-a[0].ids[0] : data.aws_subnets.private-a[0].ids[0]
+      BioPython = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
+      Bwa       = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bwa"]
+      Samtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
+      Gatk      = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
 
       Project      = local.prefix
       FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
       AccountId    = local.account_id
       Region       = local.aws_region
 
-      FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
-      EC2QueueArn     = module.bioanalysis-queue-ec2.batch_job_queue_arn
 
       DbHost     = data.aws_ssm_parameter.db_host.value
       DbName     = data.aws_ssm_parameter.db_name.value
       DbUser     = "rdsiamuser"
       DbPassword = "RDS"
       DbPort     = "5432"
-
-      GlueGenotypeJobName      = module.glue.glue_job_name["genotype"]
-      GlueDellyGenotypeJobName = module.glue.glue_job_name["deletion"]
-      GlueDelVariantsJobName   = module.glue.glue_job_name["del_variants"]
-      GlueJoinGenotypeJobName  = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName      = module.glue.glue_job_name["taxonomy_assignment"]
-      GlueLocusStatsJobName    = module.glue.glue_job_name["locus_stats"]
-      GlueGlobalStatsJobName   = module.glue.glue_job_name["global_stats"]
 
   })
 }
@@ -276,46 +238,6 @@ module "delete_resources" {
   type              = "standard"
   definition = templatefile("pipeline_delete_resources.json",
     {
-      BioPython                    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
-      Bwa                          = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bwa"]
-      Samtools                     = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
-      Gatk                         = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
-      GetSamples                   = module.bioanalysis-QueryRDS.lambda_function_arn
-      PrepareSamples               = module.bioanalysis-QueryRDS.lambda_function_arn
-      UpdateStatus                 = module.bioanalysis-QueryRDS.lambda_function_arn
-      WorkflowVariantCallingArn    = module.pipeline_child.state_machine_arn
-      WorkflowDataInsertionArn     = module.pipeline_insert_processed_data.state_machine_arn
-      WorkflowVariantAnnotationArn = module.pipeline_variant_annotation.state_machine_arn
-      WorkflowStatsCalculationArn  = module.pipeline_calculate_statistics.state_machine_arn
-      OutputBucket                 = module.s3_for_fsx.bucket_id["fsx-export"]
-      LambdaQueryRDS               = module.bioanalysis-QueryRDS.lambda_function_arn
-      InstanceProfileRoleArn       = aws_iam_instance_profile.aws_iam_instance_profile.arn
-      ServiceRoleArn               = aws_iam_role.batch_service_role.arn
-      SecurityGroupId              = data.aws_security_group.batch-compute.id
-      SubnetId                     = var.low_cost_implementation ? data.aws_subnets.public-a[0].ids[0] : data.aws_subnets.private-a[0].ids[0]
-
-      Project      = local.prefix
-      FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
-      AccountId    = local.account_id
-      Region       = local.aws_region
-
-      FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
-      EC2QueueArn     = module.bioanalysis-queue-ec2.batch_job_queue_arn
-
-      DbHost     = data.aws_ssm_parameter.db_host.value
-      DbName     = data.aws_ssm_parameter.db_name.value
-      DbUser     = "rdsiamuser"
-      DbPassword = "RDS"
-      DbPort     = "5432"
-
-      GlueGenotypeJobName      = module.glue.glue_job_name["genotype"]
-      GlueDellyGenotypeJobName = module.glue.glue_job_name["deletion"]
-      GlueDelVariantsJobName   = module.glue.glue_job_name["del_variants"]
-      GlueJoinGenotypeJobName  = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName      = module.glue.glue_job_name["taxonomy_assignment"]
-      GlueLocusStatsJobName    = module.glue.glue_job_name["locus_stats"]
-      GlueGlobalStatsJobName   = module.glue.glue_job_name["global_stats"]
-
   })
 }
 
