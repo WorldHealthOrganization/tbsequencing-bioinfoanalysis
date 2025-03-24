@@ -26,7 +26,7 @@ env:
 
 jobs:
   terraform:
-    name: 'Terraform'
+    name: 'Terraform plan'
     runs-on: ubuntu-latest
     environment: ${{inputs.environment}}
     defaults:
@@ -52,15 +52,14 @@ jobs:
       continue-on-error: true
     #Setting up the backend using github secrets
     - name: Setting up terraform backend
-      uses: finddx/seq-treat-tbkb-github-actions/configure-terraform-backend@confterrav1
-      with:
-        aws_region: ${{vars.AWS_REGION}}
-        backend_bucket: ${{secrets.TF_VAR_BACKEND_BUCKET}}
-        backend_dynamo: "tf-backend-lock-${{vars.PROJECT_NAME}}-${{inputs.environment}}"
-        working-directory:  devops/envs/${{inputs.environment}}
+      run: |
+        terraform init -input=false \
+          --backend-config="region=${{vars.AWS_REGION}}" \
+          --backend-config="bucket=${{secrets.TF_VAR_BACKEND_BUCKET}}" \
+          --backend-config="dynamodb_table=tf-backend-lock-${{vars.PROJECT_NAME}}-${{inputs.environment}}" \
+          --backend-config="key=${{github.repository}}/terraform.tfstate" 
     #Doing terraform stuff
     - name: Terraform planning
       run: |
-        terraform init -input=false
         terraform validate -no-color
         terraform plan -no-color

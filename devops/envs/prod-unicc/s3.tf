@@ -1,5 +1,5 @@
 module "s3_for_fsx" {
-  source       = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//s3?ref=s3-v1.3"
+  source       = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//s3?ref=s3-v1.3"
   s3_buckets   = local.s3_bucket_names
   environment  = var.environment
   project_name = var.project_name
