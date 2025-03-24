@@ -233,7 +233,7 @@ locals {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
       description       = "Glue job for loading raw genotypes into genphensql staged table"
-      glue_version      = "3.0"
+      glue_version      = "5.0"
       number_of_workers = "2"
       worker_type       = "G.1X"
 
@@ -324,6 +324,78 @@ locals {
         "--rds_secret_credentials_arn" = data.aws_ssm_parameter.rds_credentials_secret_arn.value
       }
       script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/taxonomy-assignment"
+    }
+    phenotype_classification = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job to insert new delly deletion variants"
+      glue_version      = "3.0"
+      number_of_workers = "2"
+      worker_type       = "G.2X"
+
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option"       = "job-bookmark-disable",
+        "--conf"                      = "spark.driver.maxResultSize=6g",
+        "--glue_db_name"              = module.glue.glue_database_name["glue_database"],
+        "--log_s3_bucket"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--postgres_db_name"          = data.aws_ssm_parameter.db_name.value,
+        "--TempDir"                   = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--additional-python-modules" = "openpyxl==3.0.10"
+      }
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/phenotypic_data_views.py"
+    }
+    variant_classification = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job to insert new delly deletion variants"
+      glue_version      = "3.0"
+      number_of_workers = "2"
+      worker_type       = "G.2X"
+
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option" = "job-bookmark-disable",
+        "--conf"                = "spark.driver.maxResultSize=6g",
+        "--glue_db_name"        = module.glue.glue_database_name["glue_database"],
+        "--log_s3_bucket"       = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--postgres_db_name"    = data.aws_ssm_parameter.db_name.value,
+        "--sample_fraction"     = 1,
+        "--unpool_frameshifts"  = 1,
+        "--extra-py-files"      = "s3://${local.glue_jobs_bucket}/glue-jobs/ETL_tools.zip",
+        "--TempDir"             = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+      }
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/variant_annotation_categorization.py"
+    }
+    data_extraction = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job to insert new delly deletion variants"
+      glue_version      = "4.0"
+      number_of_workers = "5"
+      worker_type       = "G.4X"
+
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option"       = "job-bookmark-disable",
+        "--conf"                      = "spark.driver.maxResultSize=6g",
+        "--glue_db_name"              = module.glue.glue_database_name["glue_database"],
+        "--unpool_frameshifts"        = 1,
+        "--postgres_db_name"          = data.aws_ssm_parameter.db_name.value,
+        "--additional-python-modules" = "openpyxl==3.0.10",
+        "--extra-py-files"            = "s3://${local.glue_jobs_bucket}/glue-jobs/ETL_tools.zip",
+        "--TempDir"                   = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+      }
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/stat_analysis.py"
     }
     global_stats = {
       role_arn          = aws_iam_role.glue_role.arn
@@ -418,6 +490,31 @@ locals {
       }
       script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/predict_resistance.py"
     }
+    predict_resistance_v2 = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job for predicting resistance according to mutation catalogue v2"
+      glue_version      = "4.0"
+      number_of_workers = "3"
+      worker_type       = "G.2X"
+
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option"      = "job-bookmark-enable",
+        "--glue_database_name"       = module.glue.glue_database_name["glue_database"],
+        "--postgres_database_name"   = data.aws_ssm_parameter.db_name.value,
+        "--rds_glue_connection_name" = module.glue.glue_connection_name["glue_connection"],
+        "--enable-spark-ui"          = "true",
+        "--spark-event-logs-path"    = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/predictresistancev2/",
+        "--extra-py-files"           = "s3://${local.glue_jobs_bucket}/glue-jobs/ETL_tools.zip",
+        "--TempDir"                  = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+      }
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/predict_resistance_v2.py"
+    }
+
     write_formatted_annotations_per_gene = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]

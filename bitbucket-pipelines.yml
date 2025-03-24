@@ -1,0 +1,72 @@
+image:
+  name: hashicorp/terraform:1.1.0
+
+services:
+  - docker
+
+definitions:
+  steps:
+    validateAll: &terraformValidate
+      name: Validate-all
+      oidc: true
+      script:
+        - export AWS_REGION=us-east-1
+        - export AWS_ROLE_ARN=arn:aws:iam::$AWS_ACCOUNT_ID:role/unicc-bitbucket-role
+        - export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
+        - echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
+        - cd ./devops/envs/prod-unicc
+        - >
+          terraform init 
+          --backend-config="region=$TF_VAR_aws_region"
+          --backend-config="bucket=$BACKEND_BUCKET"
+          --backend-config="dynamodb_table=$DYNAMODB_TABLE"
+          --backend-config="key=$KEY"
+        - terraform validate
+
+    planAll: &terraformPlan
+      name: Plan-all
+      oidc: true
+      script:
+        - apk add --update-cache python3
+        - ln -s /usr/bin/python3 /usr/bin/python
+        - export AWS_REGION=us-east-1
+        - export AWS_ROLE_ARN=arn:aws:iam::$AWS_ACCOUNT_ID:role/unicc-bitbucket-role
+        - export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
+        - echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
+        - cd ./devops/envs/prod-unicc
+        - >
+          terraform init 
+          --backend-config="region=$TF_VAR_aws_region"
+          --backend-config="bucket=$BACKEND_BUCKET"
+          --backend-config="dynamodb_table=$DYNAMODB_TABLE"
+          --backend-config="key=$KEY"
+        - terraform plan -out=tfplan
+
+    applyAll: &terraformApply
+      name: Apply-all
+      oidc: true
+      script:
+        - apk add --update-cache python3
+        - ln -s /usr/bin/python3 /usr/bin/python
+        - export AWS_REGION=us-east-1
+        - export AWS_ROLE_ARN=arn:aws:iam::$AWS_ACCOUNT_ID:role/unicc-bitbucket-role
+        - export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
+        - echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
+        - cd ./devops/envs/prod-unicc
+        - >
+          terraform init 
+          --backend-config="region=$TF_VAR_aws_region"
+          --backend-config="bucket=$BACKEND_BUCKET"
+          --backend-config="dynamodb_table=$DYNAMODB_TABLE"
+          --backend-config="key=$KEY"
+        - terraform apply --auto-approve
+
+pipelines:
+  branches:
+    master:
+      - step: *terraformValidate
+      - step: *terraformPlan
+      - step:
+          <<: *terraformApply
+          trigger: manual
+          deployment: Production
