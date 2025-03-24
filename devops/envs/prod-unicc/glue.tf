@@ -1,5 +1,5 @@
 module "glue" {
-  source          = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//glue?ref=glue-v1.2"
+  source          = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//glue?ref=glue-v1.2"
   glue_crawlers   = local.glue_crawlers
   glue_databases  = local.glue_databases
   glue_connection = local.glue_connection
@@ -253,6 +253,28 @@ locals {
       }
       script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/genotype"
     }
+    new_var_genotype = {
+      role_arn          = aws_iam_role.glue_role.arn
+      connections       = [module.glue.glue_connection_name["glue_connection"]]
+      description       = "Glue job for loading genotypes associated with new variants into genphensql"
+      glue_version      = "4.0"
+      number_of_workers = "2"
+      worker_type       = "G.1X"
+
+      tags = merge(local.tags, {
+        Name = local.prefix
+      })
+
+      default_arguments = {
+        "--job-bookmark-option"   = "job-bookmark-enable",
+        "--enable-spark-ui"       = "true",
+        "--spark-event-logs-path" = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/new_variant_genotype/",
+        "--glue_db_name"          = module.glue.glue_database_name["glue_database"],
+        "--postgres_db_name"      = data.aws_ssm_parameter.db_name.value
+      }
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/genotype-new"
+    }
+
     deletion = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
@@ -328,7 +350,7 @@ locals {
     phenotype_classification = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
-      description       = "Glue job to insert new delly deletion variants"
+      description       = "Glue job to classify phenotype results."
       glue_version      = "3.0"
       number_of_workers = "2"
       worker_type       = "G.2X"
@@ -351,9 +373,9 @@ locals {
     variant_classification = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
-      description       = "Glue job to insert new delly deletion variants"
-      glue_version      = "3.0"
-      number_of_workers = "2"
+      description       = "Glue job to run the genetic variant classification algorithm."
+      glue_version      = "4.0"
+      number_of_workers = "3"
       worker_type       = "G.2X"
 
       tags = merge(local.tags, {
@@ -362,7 +384,6 @@ locals {
 
       default_arguments = {
         "--job-bookmark-option" = "job-bookmark-disable",
-        "--conf"                = "spark.driver.maxResultSize=6g",
         "--glue_db_name"        = module.glue.glue_database_name["glue_database"],
         "--log_s3_bucket"       = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
         "--postgres_db_name"    = data.aws_ssm_parameter.db_name.value,
@@ -434,13 +455,9 @@ locals {
       })
 
       default_arguments = {
-        "--job-bookmark-option"        = "job-bookmark-disable",
-        "--conf"                       = "spark.driver.maxResultSize=6g",
-        "--glue_db_name"               = module.glue.glue_database_name["glue_database"],
-        "--postgres_db_name"           = data.aws_ssm_parameter.db_name.value,
-        "--rds_host"                   = data.aws_ssm_parameter.db_host.value,
-        "--rds_port"                   = data.aws_ssm_parameter.db_port.value,
-        "--rds_secret_credentials_arn" = data.aws_ssm_parameter.rds_credentials_secret_arn.value
+        "--job-bookmark-option" = "job-bookmark-disable",
+        "--glue_db_name"        = module.glue.glue_database_name["glue_database"],
+        "--postgres_db_name"    = data.aws_ssm_parameter.db_name.value
       }
       script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/del-variants"
     }
@@ -486,9 +503,9 @@ locals {
         "--rds_database_name"        = data.aws_ssm_parameter.db_name.value,
         "--rds_glue_connection_name" = module.glue.glue_connection_name["glue_connection"],
         "--enable-spark-ui"          = "true",
-        "--spark-event-logs-path"    = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/predictresistance/",
+        "--spark-event-logs-path"    = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/predictresistance/"
       }
-      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/predict_resistance.py"
+      script_location = "s3://${local.glue_jobs_bucket]}/glue-jobs/predict_resistance.py"
     }
     predict_resistance_v2 = {
       role_arn          = aws_iam_role.glue_role.arn
@@ -509,12 +526,10 @@ locals {
         "--rds_glue_connection_name" = module.glue.glue_connection_name["glue_connection"],
         "--enable-spark-ui"          = "true",
         "--spark-event-logs-path"    = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/predictresistancev2/",
-        "--extra-py-files"           = "s3://${local.glue_jobs_bucket}/glue-jobs/ETL_tools.zip",
-        "--TempDir"                  = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--extra-py-files"           = "s3://${local.glue_jobs_bucket}/glue-jobs/ETL_tools.zip"
       }
       script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/predict_resistance_v2.py"
     }
-
     write_formatted_annotations_per_gene = {
       role_arn          = aws_iam_role.glue_role.arn
       connections       = [module.glue.glue_connection_name["glue_connection"]]
@@ -534,10 +549,10 @@ locals {
         "--spark-event-logs-path"    = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/writefapg/",
         "--glue_db_name"             = module.glue.glue_database_name["glue_database"],
         "--postgres_db_name"         = data.aws_ssm_parameter.db_name.value,
-        "--rds_glue_connection_name" = module.glue.glue_connection_name["glue_connection"],
+        "--rds_glue_connection_name" = module.glue.glue_connection_name["glue_connection"]
       }
 
-      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/write_formatted_annotations_per_gene.py"
+      script_location = "s3://${local.glue_jobs_bucket]}/glue-jobs/write_formatted_annotations_per_gene.py"
     }
   }
 }
