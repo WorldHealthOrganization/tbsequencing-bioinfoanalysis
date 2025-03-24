@@ -11,7 +11,7 @@
                 "KrakenDbName": "mycobacterium",
                 "NucleotideAccession": "NC_000962.3",
                 "RefseqAssemblyAccession": "GCF_000195955.2",
-                "RDSQuery": "UPDATE submission_sample SET bioanalysis_status = 'Unprocessed' WHERE id IN (SELECT DISTINCT s_sample.id FROM submission_sample s_sample INNER JOIN submission_pdstest pdst ON s_sample.id = pdst.sample_id INNER JOIN submission_sequencingdata s_data ON s_sample.id = s_data.sample_id WHERE bioanalysis_status is null AND sequencing_platform='ILLUMINA' AND library_layout='PAIRED' AND library_preparation_strategy='WGS' and staging='f');",
+                "RDSQuery": "UPDATE submission_sample SET bioanalysis_status = 'Unprocessed' WHERE id IN (SELECT DISTINCT s_sample.id FROM submission_sample s_sample LEFT JOIN submission_pdstest pdst ON s_sample.id = pdst.sample_id LEFT JOIN submission_mictest mic ON s_sample.id = mic.sample_id INNER JOIN submission_sequencingdata s_data ON s_sample.id = s_data.sample_id WHERE bioanalysis_status is null AND sequencing_platform='ILLUMINA' AND library_layout='PAIRED' AND library_preparation_strategy='WGS' AND (mic.staging='f' OR pdst.staging='f') AND (mic.sample_id IS NOT NULL OR pdst.sample_id IS NOT NULL));",
                 "DbConnection": {
                     "Port": "${DbPort}",
                     "User": "${DbUser}",
