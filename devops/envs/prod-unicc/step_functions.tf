@@ -188,7 +188,7 @@ module "create_resources" {
       InstanceProfileRoleArn = aws_iam_instance_profile.aws_iam_instance_profile.arn
       ServiceRoleArn         = aws_iam_role.batch_service_role.arn
       SecurityGroupId        = data.aws_security_group.batch-compute.id
-      SubnetId               = data.aws_subnets.private-a[0].ids[0]
+      SubnetId               = data.aws_subnets.private-a.ids[0]
 
       Project      = local.prefix
       FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
