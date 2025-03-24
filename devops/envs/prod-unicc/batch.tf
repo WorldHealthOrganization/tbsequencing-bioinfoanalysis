@@ -1,11 +1,11 @@
 #batch Job Definitions
 module "batch_job_definition_ec2" {
-  source                = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//batch_job_definition_ec2?ref=batch_job_definition_ec2-v2.0"
+  source                = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_job_definition_ec2?ref=batch_job_definition_ec2-v2.0"
   batch_job_definitions = local.batch_job_definitions
 }
 
 module "batch_job_definition_fargate" {
-  source                        = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//batch_job_definition_fargate?ref=batch_job_definition_fargate-v2.1"
+  source                        = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_job_definition_fargate?ref=batch_job_definition_fargate-v2.1"
   project_name                  = var.project_name
   module_name                   = "main"
   environment                   = var.environment
@@ -140,7 +140,7 @@ locals {
 
 #Batch ENVS
 module "bioanalysis-env-ec2" {
-  source               = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//batch_compute_env_ec2?ref=batch_compute_env_ec2-v2.1"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_compute_env_ec2?ref=batch_compute_env_ec2-v2.1"
   batch_name           = "${local.prefix}-ec2"
   launch_template_name = "${local.prefix}-ec2"
   environment          = local.prefix
@@ -154,24 +154,23 @@ module "bioanalysis-env-ec2" {
 }
 
 module "bioanalysis-env-fargate" {
-  source            = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//batch_compute_env_fargate?ref=batch_compute_env_fargate-v2.1"
+  source            = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_compute_env_fargate?ref=batch_compute_env_fargate-v2.1"
   compute_env_name  = "${local.prefix}-fargate"
   service_role_name = aws_iam_role.batch_service_role.name
   service_role_arn  = aws_iam_role.batch_service_role.arn
-  subnet_ids        = [data.aws_subnets.private-a.ids[0], data.aws_subnets.private-b.ids[0]]
+  subnet_ids        = var.low_cost_implementation ? [data.aws_subnets.public-a[0].ids[0], data.aws_subnets.public-b[0].ids[0]] : [data.aws_subnets.private-a[0].ids[0], data.aws_subnets.private-b[0].ids[0]]
   security_group_id = data.aws_security_group.batch-compute.id
-
 }
 
 #batch queue
 module "bioanalysis-queue-fargate" {
-  source               = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
   queue_name           = "${local.prefix}-fargate"
   compute_environments = module.bioanalysis-env-fargate.arn
 }
 
 module "bioanalysis-queue-ec2" {
-  source               = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
   queue_name           = "${local.prefix}-ec2"
   compute_environments = module.bioanalysis-env-ec2.batch_compute_environment_arn
 }
