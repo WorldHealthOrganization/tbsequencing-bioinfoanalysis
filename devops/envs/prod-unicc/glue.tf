@@ -552,7 +552,7 @@ locals {
         "--rds_glue_connection_name" = module.glue.glue_connection_name["glue_connection"]
       }
 
-      script_location = "s3://${local.glue_jobs_bucket]}/glue-jobs/write_formatted_annotations_per_gene.py"
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/write_formatted_annotations_per_gene.py"
     }
   }
 }
