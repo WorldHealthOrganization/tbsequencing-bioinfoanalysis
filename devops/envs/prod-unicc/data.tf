@@ -58,3 +58,7 @@ data "aws_iam_role" "ecs_task_role" {
 data "aws_ssm_parameter" "static_files_bucket_name" {
   name = "/${var.environment}/static_files_bucket_name"
 }
+
+data "aws_ssm_parameter" "sequence_data_bucket_name" {
+  name = "/${var.environment}/sequence_data_bucket_name"
+}
