@@ -251,7 +251,7 @@ locals {
         "--rds_port"                   = data.aws_ssm_parameter.db_port.value,
         "--rds_secret_credentials_arn" = data.aws_ssm_parameter.rds_credentials_secret_arn.value
       }
-      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/genotype"
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/genotype-known"
     }
     new_var_genotype = {
       role_arn          = aws_iam_role.glue_role.arn
