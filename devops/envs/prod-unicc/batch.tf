@@ -158,7 +158,7 @@ module "bioanalysis-env-fargate" {
   compute_env_name  = "${local.prefix}-fargate"
   service_role_name = aws_iam_role.batch_service_role.name
   service_role_arn  = aws_iam_role.batch_service_role.arn
-  subnet_ids        = var.low_cost_implementation ? [data.aws_subnets.public-a[0].ids[0], data.aws_subnets.public-b[0].ids[0]] : [data.aws_subnets.private-a[0].ids[0], data.aws_subnets.private-b[0].ids[0]]
+  subnet_ids        = [data.aws_subnets.private-a.ids[0], data.aws_subnets.private-b.ids[0]]
   security_group_id = data.aws_security_group.batch-compute.id
 }
 
