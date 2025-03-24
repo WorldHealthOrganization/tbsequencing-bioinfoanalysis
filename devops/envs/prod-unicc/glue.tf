@@ -505,7 +505,7 @@ locals {
         "--enable-spark-ui"          = "true",
         "--spark-event-logs-path"    = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/glue/predictresistance/"
       }
-      script_location = "s3://${local.glue_jobs_bucket]}/glue-jobs/predict_resistance.py"
+      script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/predict_resistance.py"
     }
     predict_resistance_v2 = {
       role_arn          = aws_iam_role.glue_role.arn
