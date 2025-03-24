@@ -11,12 +11,20 @@ permissions:
   contents: read
   
 jobs:
-  copy-glue-scripts-s3:
-    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/glue_copy_scripts.yml@main
-    with:
-      environment: ${{inputs.environment}}
-      role_name: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'copy-glue'}}
-      identifier: ${{startsWith(inputs.environment, 'prod') && 'main' || 'bio'}}
-    secrets:
-      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
-  
+  upload_to_s3:
+    name: 'Upload Glue scripts'
+    runs-on: ubuntu-latest
+    environment: ${{inputs.environment}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{secrets.AWS_ACCOUNT_ID}}:role/${{vars.PROJECT_NAME}}-${{startsWith(inputs.environment, 'prod') && 'main' || 'bio'}}-${{inputs.environment}}-my-github-actions-${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'copy-glue'}}
+          aws-region: ${{vars.AWS_REGION}}
+          mask-aws-account-id: true
+      - run: |
+          cd ./cfn/glue-jobs/
+          zip -r9 ETL_tools.zip biosql_gene_views.py variant_annotation_categorization.py phenotypic_data_views.py
+          aws s3 cp ./  s3://${{secrets.GLUE_BUCKET}}/glue-jobs/ --recursive
