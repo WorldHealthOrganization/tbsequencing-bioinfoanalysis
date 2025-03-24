@@ -1,5 +1,5 @@
 module "bioanalysis-QueryRDS" {
-  source = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//lambda?ref=lambda-v1.0"
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//lambda?ref=lambda-v1.0"
   # source = "terraform-aws-modules/lambda/aws"
   # version = "~> 4.7.1"
 

@@ -1,7 +1,7 @@
 #step function step_functions
 #Child Pipeline
 module "pipeline_child" {
-  source = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
 
   name              = "${local.prefix}-${local.pipeline_variant_calling_name}"
   create_role       = true
@@ -68,7 +68,7 @@ data "aws_iam_policy_document" "child_pipeline" {
 
 #master pipeline
 module "pipeline_master" {
-  source = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
 
   name              = "${local.prefix}-${local.pipeline_master_name}"
   create_role       = true
@@ -185,7 +185,7 @@ data "aws_iam_policy_document" "master_pipeline" {
 
 # Insert Process data pipeline
 module "pipeline_insert_processed_data" {
-  source = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
 
   name              = "${local.prefix}-${local.pipeline_data_insertion_name}"
   create_role       = true
@@ -258,7 +258,7 @@ data "aws_iam_policy_document" "pipeline_insert_processed_data" {
 
 # Variant Annotation pipeline
 module "pipeline_variant_annotation" {
-  source = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
 
   name              = "${local.prefix}-${local.pipeline_variant_annotation_name}"
   create_role       = true
@@ -354,7 +354,7 @@ data "aws_iam_policy_document" "pipeline_variant_annotation" {
 
 # Calculate statistics pipeline
 module "pipeline_calculate_statistics" {
-  source = "git::git@bitbucket.org:awsopda/who-seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
 
   name              = "${local.prefix}-${local.pipeline_calculate_statistics_name}"
   create_role       = true
