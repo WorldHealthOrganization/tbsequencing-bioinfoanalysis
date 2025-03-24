@@ -188,7 +188,7 @@ module "create_resources" {
       InstanceProfileRoleArn = aws_iam_instance_profile.aws_iam_instance_profile.arn
       ServiceRoleArn         = aws_iam_role.batch_service_role.arn
       SecurityGroupId        = data.aws_security_group.batch-compute.id
-      SubnetId               = var.low_cost_implementation ? data.aws_subnets.public-a[0].ids[0] : data.aws_subnets.private-a[0].ids[0]
+      SubnetId               = data.aws_subnets.private-a[0].ids[0]
 
       Project      = local.prefix
       FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
@@ -426,7 +426,7 @@ module "pipeline_calculate_statistics" {
       LambdaQueryRDS   = module.bioanalysis-QueryRDS.lambda_function_arn
       FargateQueueArn  = module.bioanalysis-queue-fargate.batch_job_queue_arn
       BioPythonFargate = module.batch_job_definition_fargate.batch_job_fargate_definition_arn["${local.prefix}-BioPython-fargate"]
-      StaticBucketArn  = data.aws_ssm_parameter.static_bucket_name.value
+      StaticBucketArn  = data.aws_ssm_parameter.static_files_bucket_name.value
   })
 
   logging_configuration = {
