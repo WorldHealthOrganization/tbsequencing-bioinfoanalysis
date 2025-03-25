@@ -1174,20 +1174,6 @@
                     "REGION.$": "$.DbConnection.Region"
                 }
             },
-            "Next": "UpdateStatus"
-        },
-        "UpdateStatus": {
-            "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${UpdateStatus}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Annotated', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Inserted';"
-                }
-            },
-            "ResultPath": null,
             "Next": "WriteFormattedAnnotationPerGene"
         },
         "WriteFormattedAnnotationPerGene": {
@@ -1197,16 +1183,8 @@
             "Parameters": {
                 "JobName": "${GlueWriteFormattedAnnotationPerGeneJobName}"
             },
-            "Next": "RunPredictResistanceGlueJob"
-        },
-        "RunPredictResistanceGlueJob": {
-            "Type": "Task",
-            "ResultPath": null,
-            "Resource": "arn:aws:states:::glue:startJobRun.sync",
-            "Parameters": {
-                "JobName": "${GluePredictResistanceJobName}"
-            },
             "End": true
         }
+
     }
 }
