@@ -342,8 +342,6 @@ module "pipeline_variant_annotation" {
       FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
       EC2QueueArn     = module.bioanalysis-queue-ec2.batch_job_queue_arn
 
-      GluePredictResistanceJobNameV1             = module.glue.glue_job_name["predict_resistance"]
-      GluePredictResistanceJobNameV2             = module.glue.glue_job_name["predict_resistance_v2"]
       GlueWriteFormattedAnnotationPerGeneJobName = module.glue.glue_job_name["write_formatted_annotations_per_gene"]
 
       UpdateStatus = module.bioanalysis-QueryRDS.lambda_function_arn
@@ -427,6 +425,10 @@ module "pipeline_calculate_statistics" {
       FargateQueueArn  = module.bioanalysis-queue-fargate.batch_job_queue_arn
       BioPythonFargate = module.batch_job_definition_fargate.batch_job_fargate_definition_arn["${local.prefix}-BioPython-fargate"]
       StaticBucketArn  = data.aws_ssm_parameter.static_files_bucket_name.value
+
+      GluePredictResistanceJobNameV1 = module.glue.glue_job_name["predict_resistance"]
+      GluePredictResistanceJobNameV2 = module.glue.glue_job_name["predict_resistance_v2"]
+
   })
 
   logging_configuration = {
