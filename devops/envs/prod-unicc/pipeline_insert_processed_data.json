@@ -518,25 +518,13 @@
                     "Next": "failEnd"
                 }
             ],
-            "Default": "UpdateStatus"
+            "Default": "Success"
+        },
+        "Success": {
+            "Type": "Succeed"
         },
         "failEnd": {
             "Type": "Fail"
-        },
-        "UpdateStatus": {
-            "Type": "Task",
-            "ResultPath": null,
-            "InputPath": "$[0]",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${LambdaQueryRDS}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "UPDATE public.submission_sample\n SET    bioanalysis_status = 'Inserted', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Uploaded to S3';"
-                }
-            },
-            "End": true
         }
     }
 }
