@@ -23,12 +23,30 @@
                 "NumericGreaterThan": 1,
                 "Next": "ConcurrencyProtectionTriggered"
             }],
-            "Default": "DumpGenotypeResistanceFile"
+            "Default": "RunPredictResistanceGlueJobV1"
         },
         "ConcurrencyProtectionTriggered": {
             "Type": "Fail",
             "Error": "ConcurrencyProtectionTriggered",
             "Cause": "Another instance is running in parallel, skipping this one"
+        },
+        "RunPredictResistanceGlueJobV1": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "${GluePredictResistanceJobNameV1}"
+            },
+            "Next": "RunPredictResistanceGlueJobV2"
+        },
+        "RunPredictResistanceGlueJobV2": {
+            "Type": "Task",
+            "ResultPath": null,
+            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+            "Parameters": {
+                "JobName": "${GluePredictResistanceJobNameV2}"
+            },
+            "Next": "DumpGenotypeResistanceFile"
         },
         "DumpGenotypeResistanceFile": {
             "Type": "Task",
