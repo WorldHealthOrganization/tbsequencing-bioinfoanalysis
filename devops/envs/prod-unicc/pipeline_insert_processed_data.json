@@ -181,38 +181,27 @@
             "Type": "Parallel",
             "Branches": [
                 {
-                    "StartAt": "stageGenotypesCatch",
+                    "StartAt": "newVariantGenotype",
                     "States": {
-                        "stageGenotypesCatch": {
+                        "newVariantGenotype": {
                             "Type": "Parallel",
                             "OutputPath": "$[0]",
                             "Branches": [
                                 {
-                                    "StartAt": "stageGenotypes",
+                                    "StartAt": "stageNewVariantGenotype",
                                     "States": {
-                                        "stageGenotypes": {
+                                        "stageNewVariantGenotype": {
                                             "Type": "Task",
                                             "Resource": "arn:aws:states:::glue:startJobRun.sync",
                                             "ResultPath": null,
                                             "Parameters": {
-                                                "JobName": "${GlueGenotypeJobName}",
+                                                "JobName": "${GlueNewVarGenotypeJobName}",
                                                 "NumberOfWorkers": 8,
                                                 "WorkerType": "G.1X"
                                             },
-                                            "Next": "stageDellyGenotypes"
+                                            "Next": "insertNewVariantGenotype"
                                         },
-                                        "stageDellyGenotypes": {
-                                            "Type": "Task",
-                                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
-                                            "ResultPath": null,
-                                            "Parameters": {
-                                                "JobName": "${GlueDellyGenotypeJobName}",
-                                                "NumberOfWorkers": 5,
-                                                "WorkerType": "G.1X"
-                                            },
-                                            "Next": "insertNewVariants"
-                                        },
-                                        "insertNewVariants": {
+                                        "insertNewVariantGenotype": {
                                             "Type": "Task",
                                             "ResultPath": null,
                                             "Resource": "arn:aws:states:::batch:submitJob.sync",
@@ -237,7 +226,7 @@
                                                     "Environment": [
                                                         {
                                                             "Name": "RDS_QUERY",
-                                                            "Value": "INSERT INTO public.genphen_variant(chromosome, position, reference_nucleotide, alternative_nucleotide)\n    SELECT DISTINCT chromosome,\n           position,\n           reference_nucleotide,\n           alternative_nucleotide\n    FROM genphensql.staged_genotype\n    WHERE staged_genotype.variant_id IS NULL AND NOT reference_nucleotide SIMILAR TO 'DEL-[0-9]+'\n    ON CONFLICT DO NOTHING;\n"
+                                                            "Value": "INSERT INTO public.submission_genotype(sample_id, variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value)\n SELECT staged_genotype.sample_id as sample_id, variant.variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value\n FROM genphensql.staged_genotype\n INNER JOIN public.genphen_variant variant ON variant.chromosome=staged_genotype.chromosome\n AND variant.position=staged_genotype.position\n AND variant.reference_nucleotide=staged_genotype.reference_nucleotide\n AND variant.alternative_nucleotide=staged_genotype.alternative_nucleotide;\n"
                                                         }
                                                     ]
                                                 },
@@ -298,6 +287,31 @@
                                                     "REGION.$": "$.DbConnection.Region"
                                                 }
                                             },
+                                            "Next": "deleteStagedGenotypes"
+                                        },
+                                        "deleteStagedGenotypes": {
+                                            "Type": "Task",
+                                            "ResultPath": null,
+                                            "Resource": "arn:aws:states:::lambda:invoke",
+                                            "Parameters": {
+                                                "FunctionName": "${LambdaQueryRDS}",
+                                                "Payload": {
+                                                    "DbConnection.$": "$.DbConnection",
+                                                    "CalledFunction": "run_query",
+                                                    "Query": "DELETE FROM genphensql.staged_genotype;"
+                                                }
+                                            },
+                                            "Next": "stageDellyGenotypes"
+                                        },
+                                        "stageDellyGenotypes": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::glue:startJobRun.sync",
+                                            "ResultPath": null,
+                                            "Parameters": {
+                                                "JobName": "${GlueDellyGenotypeJobName}",
+                                                "NumberOfWorkers": 5,
+                                                "WorkerType": "G.1X"
+                                            },
                                             "Next": "insertDelVariants"
                                         },
                                         "insertDelVariants": {
@@ -308,55 +322,6 @@
                                                 "JobName": "${GlueDelVariantsJobName}",
                                                 "NumberOfWorkers": 2,
                                                 "WorkerType": "G.1X"
-                                            },
-                                            "Next": "insertGenotypesFargate"
-                                        },
-                                        "insertGenotypesFargate": {
-                                            "Type": "Task",
-                                            "ResultPath": null,
-                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
-                                            "Parameters": {
-                                                "JobName": "insertGenotypesFargate",
-                                                "JobQueue": "${FargateQueueArn}",
-                                                "JobDefinition": "${BioPythonFargate}",
-                                                "ContainerOverrides": {
-                                                    "ResourceRequirements": [
-                                                        {
-                                                            "Type": "VCPU",
-                                                            "Value": "0.25"
-                                                        },
-                                                        {
-                                                            "Type": "MEMORY",
-                                                            "Value": "512"
-                                                        }
-                                                    ],
-                                                    "Command": [
-                                                        "/scripts/query_rds.py",
-                                                        "--db_host",
-                                                        "Ref::ENDPOINT",
-                                                        "--db_name",
-                                                        "Ref::NAME",
-                                                        "--db_user",
-                                                        "Ref::USER",
-                                                        "--db_port",
-                                                        "Ref::PORT",
-                                                        "--aws_region",
-                                                        "Ref::REGION"
-                                                    ],
-                                                    "Environment": [
-                                                        {
-                                                            "Name": "RDS_QUERY",
-                                                            "Value": "INSERT INTO public.submission_genotype(sample_id, variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value)\n SELECT staged_genotype.sample_id as sample_id, variant.variant_id, genotyper, quality, reference_ad, alternative_ad, total_dp, genotype_value\n FROM genphensql.staged_genotype\n INNER JOIN public.genphen_variant variant ON variant.chromosome=staged_genotype.chromosome\n AND variant.position=staged_genotype.position\n AND variant.reference_nucleotide=staged_genotype.reference_nucleotide\n AND variant.alternative_nucleotide=staged_genotype.alternative_nucleotide WHERE NOT genphensql.staged_genotype.reference_nucleotide SIMILAR TO 'DEL-[0-9]+';\n"
-                                                        }
-                                                    ]
-                                                },
-                                                "Parameters": {
-                                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
-                                                    "NAME.$": "$.DbConnection.Name",
-                                                    "USER.$": "$.DbConnection.User",
-                                                    "PORT.$": "$.DbConnection.Port",
-                                                    "REGION.$": "$.DbConnection.Region"
-                                                }
                                             },
                                             "Next": "insertDelGenotypes"
                                         },
@@ -407,9 +372,9 @@
                                                     "REGION.$": "$.DbConnection.Region"
                                                 }
                                             },
-                                            "Next": "deleteStagedGenotypes"
+                                            "Next": "deleteStagedGenotypesAgain"
                                         },
-                                        "deleteStagedGenotypes": {
+                                        "deleteStagedGenotypesAgain": {
                                             "Type": "Task",
                                             "ResultPath": null,
                                             "Resource": "arn:aws:states:::lambda:invoke",
@@ -431,6 +396,7 @@
                                     "ErrorEquals": [
                                         "States.ALL"
                                     ],
+                                    "ResultPath": "$.Error",
                                     "Next": "failEndGenotype"
                                 }
                             ],
@@ -443,25 +409,28 @@
                     }
                 },
                 {
-                    "StartAt": "insertTaxonomy",
+                    "StartAt": "insertKnownVariantGenotype",
                     "States": {
-                        "insertTaxonomy": {
+                        "insertKnownVariantGenotype": {
                             "Type": "Task",
                             "Resource": "arn:aws:states:::glue:startJobRun.sync",
                             "Parameters": {
-                                "JobName": "${GlueTaxonomyJobName}"
+                                "JobName": "${GlueGenotypeJobName}",
+                                "NumberOfWorkers": 8,
+                                "WorkerType": "G.1X"
                             },
                             "Catch": [
                                 {
                                     "ErrorEquals": [
                                         "States.ALL"
                                     ],
-                                    "Next": "failEndTaxonomy"
+                                    "ResultPath": "$.Error",
+                                    "Next": "failEndKnownVariantGenotype"
                                 }
                             ],
                             "End": true
                         },
-                        "failEndTaxonomy": {
+                        "failEndKnownVariantGenotype": {
                             "Type": "Pass",
                             "End": true
                         }
@@ -483,6 +452,7 @@
                                     "ErrorEquals": [
                                         "States.ALL"
                                     ],
+                                    "ResultPath": "$.Error",
                                     "Next": "failEndLocus"
                                 }
                             ],
@@ -508,6 +478,7 @@
                                     "ErrorEquals": [
                                         "States.ALL"
                                     ],
+                                    "ResultPath": "$.Error",
                                     "Next": "failEndGlobalStats"
                                 }
                             ],
@@ -547,25 +518,13 @@
                     "Next": "failEnd"
                 }
             ],
-            "Default": "UpdateStatus"
+            "Default": "Success"
+        },
+        "Success": {
+            "Type": "Succeed"
         },
         "failEnd": {
             "Type": "Fail"
-        },
-        "UpdateStatus": {
-            "Type": "Task",
-            "ResultPath": null,
-            "InputPath": "$[0]",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${LambdaQueryRDS}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "UPDATE public.submission_sample\n SET    bioanalysis_status = 'Inserted', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Uploaded to S3';"
-                }
-            },
-            "End": true
         }
     }
 }
