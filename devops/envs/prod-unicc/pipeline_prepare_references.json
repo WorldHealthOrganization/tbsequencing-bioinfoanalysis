@@ -1,0 +1,327 @@
+{
+    "Comment": "Master pipeline for analysis workflow.",
+    "StartAt": "MainFlow",
+    "States": {
+
+        "MainFlow": {
+            "Type": "Parallel",
+            "ResultPath": "$.FlowResult",
+            "OutputPath": "$.FlowResult[0]",
+            "Branches": [
+                {
+                    "StartAt": "DefineDefaults",
+                    "States": {
+                        "DefineDefaults": {
+                            "Type": "Pass",
+                            "Next": "ApplyDefaults",
+                            "ResultPath": "$.InputDefaults",
+                            "Parameters": {
+                                "AssemblyName": "ASM19595v2",
+                                "NucleotideAccession": "NC_000962.3",
+                                "RefseqAssemblyAccession": "GCF_000195955.2",
+                                "DbConnection": {
+                                    "Port": "${DbPort}",
+                                    "User": "${DbUser}",
+                                    "Name": "${DbName}",
+                                    "Region": "${Region}",
+                                    "Endpoint": "${DbHost}"
+                                }                
+                            }
+                        },
+                        "ApplyDefaults": {
+                            "Type": "Pass",
+                            "Next": "ExtractDefaults",
+                            "ResultPath": "$",
+                            "Parameters": {
+                                "ParametersWithDefaults.$": "States.JsonMerge($.InputDefaults, $$.Execution.Input, false)"
+                            }
+                        },
+                        "ExtractDefaults": {
+                            "Type": "Pass",
+                            "Next": "createFolders",
+                            "ResultPath": "$",
+                            "Parameters": {
+                                "AssemblyName.$": "$.ParametersWithDefaults.AssemblyName",
+                                "NucleotideAccession.$": "$.ParametersWithDefaults.NucleotideAccession",
+                                "RefseqAssemblyAccession.$": "$.ParametersWithDefaults.RefseqAssemblyAccession",
+                                "JobQueueArn.$": "$.ParametersWithDefaults.JobQueueArn",
+                                "DbConnection.$": "$.ParametersWithDefaults.DbConnection"
+                            }
+                        },        
+                        "createFolders": {
+                            "Type":"Task",
+                            "ResultPath": null,
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "Parameters": {
+                                "JobName": "create-folders",
+                                "JobDefinition": "${Samtools}",
+                                "JobQueue.$": "$.JobQueueArn",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "mkdir",
+                                        "genotype",
+                                        "locus-stats",
+                                        "taxonomy-assignment",
+                                        "global-stats",
+                                        "deletion",
+                                        "alignment"
+                                    ]
+                                }
+                            },
+                            "Next":"prepareReferenceFiles"
+                        },                        
+                        "prepareReferenceFiles": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                            "ResultPath": null,
+                            "Parameters": {
+                                "JobName": "prepare-refs",
+                                "JobDefinition": "${BioPython}",
+                                "JobQueue.$": "$.JobQueueArn",
+                                "ContainerOverrides": {
+                                    "Command": [
+                                        "/scripts/download_references_ncbi_dataset_api.py",
+                                        "--genome_accession_id",
+                                        "Ref::GENOME_ID",
+                                        "--assembly_accession_id",
+                                        "Ref::ASSEMBLY_ID",
+                                        "--output_folder",
+                                        "references/"
+                                    ]
+                                },
+                                "Parameters": {
+                                    "GENOME_ID.$": "$.RefseqAssemblyAccession",
+                                    "ASSEMBLY_ID.$": "$.AssemblyName"
+                                }
+                            },
+                            "Next": "indexReferenceFiles"
+                        },
+                        "indexReferenceFiles": {
+                            "Type": "Parallel",
+                            "ResultPath": null,
+                            "Branches": [
+                                {
+                                    "StartAt": "indexBwa",
+                                    "States": {
+                                        "indexBwa": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "bwa-index",
+                                                "JobDefinition": "${Bwa}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "bwa",
+                                                        "index",
+                                                        "Ref::REFERENCE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "REFERENCE_ID.$": "States.Format('references/{}_{}.fna', $.RefseqAssemblyAccession, $.AssemblyName)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "indexSamtools",
+                                    "States": {
+                                        "indexSamtools": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "samtools-index",
+                                                "JobDefinition": "${Samtools}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "samtools",
+                                                        "faidx",
+                                                        "Ref::REFERENCE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "REFERENCE_ID.$": "States.Format('references/{}_{}.fna', $.RefseqAssemblyAccession, $.AssemblyName)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "indexGatk",
+                                    "States": {
+                                        "indexGatk": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "gatk-index",
+                                                "JobDefinition": "${Gatk}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "gatk",
+                                                        "CreateSequenceDictionary",
+                                                        "--REFERENCE",
+                                                        "Ref::REFERENCE_ID"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "REFERENCE_ID.$": "States.Format('references/{}_{}.fna', $.RefseqAssemblyAccession, $.AssemblyName)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "convertingGffToBed",
+                                    "States": {
+                                        "convertingGffToBed": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "gatk-index",
+                                                "JobDefinition": "${BioPython}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "/scripts/gff_to_bed.py",
+                                                        "--input_gff_file",
+                                                        "Ref::GFF_FILE",
+                                                        "--output_bed_file",
+                                                        "Ref::BED_FILE"
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "GFF_FILE.$": "States.Format('references/{}.gff', $.RefseqAssemblyAccession)",
+                                                    "BED_FILE.$": "States.Format('references/{}_WGS.bed', $.RefseqAssemblyAccession)"
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                },
+                                {
+                                    "StartAt": "extractInsertedVariantsWithID",
+                                    "States": {
+                                        "extractInsertedVariantsWithID" : {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters" : {
+                                                "JobName": "extractInsertedVariants",
+                                                "JobDefinition": "${BioPython}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Environment": [
+                                                        {
+                                                            "Name": "RDS_QUERY",
+                                                            "Value": "SELECT chromosome, position, variant_id, reference_nucleotide, alternative_nucleotide \n FROM public.genphen_variant variant\n ORDER BY position;"
+                                                        },
+                                                        {
+                                                            "Name": "RDS_QUERY_OUTPUT",
+                                                            "Value": "references/variant_ids.tsv"
+                                                        }
+                                                    ],
+                                                    "Command": [
+                                                        "/scripts/query_rds.py",
+                                                        "--db_host",
+                                                        "Ref::ENDPOINT",
+                                                        "--db_name",
+                                                        "Ref::NAME",
+                                                        "--db_user",
+                                                        "Ref::USER",
+                                                        "--db_port",
+                                                        "Ref::PORT",
+                                                        "--aws_region",
+                                                        "Ref::REGION"
+                                                    ],
+                                                    "ResourceRequirements": [
+                                                        {
+                                                            "Type": "MEMORY",
+                                                            "Value": "50004"
+                                                        }
+                                                    ]
+                                                },
+                                                "Parameters": {
+                                                    "ENDPOINT.$": "$.DbConnection.Endpoint",
+                                                    "NAME.$": "$.DbConnection.Name",
+                                                    "USER.$": "$.DbConnection.User",
+                                                    "PORT.$": "$.DbConnection.Port",
+                                                    "REGION.$": "$.DbConnection.Region"
+                                                }                
+                                            },
+                                            "Next": "compressKnownVariants",
+                                            "ResultPath": null
+                                        },
+                                        "compressKnownVariants": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "compress-variants",
+                                                "JobDefinition": "${Samtools}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "bgzip",
+                                                        "references/variant_ids.tsv"
+                                                    ]
+                                                }
+                                            },
+                                            "Next": "indexKnownVariants",
+                                            "ResultPath": null
+                                        },
+                                        "indexKnownVariants": {
+                                            "Type": "Task",
+                                            "Resource": "arn:aws:states:::batch:submitJob.sync",
+                                            "Parameters": {
+                                                "JobName": "index-variants",
+                                                "JobDefinition": "${Samtools}",
+                                                "JobQueue.$": "$.JobQueueArn",
+                                                "ContainerOverrides": {
+                                                    "Command": [
+                                                        "tabix",
+                                                        "--begin",
+                                                        "2",
+                                                        "--end",
+                                                        "2",
+                                                        "references/variant_ids.tsv.gz"
+                                                    ]
+                                                }
+                                            },
+                                            "End": true
+                                        }
+                                    }
+                                }
+                            ],
+                            "End": true
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.DataLimitExceeded",
+                        "States.Runtime"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                },
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": "$.error",
+                    "Next": "Fail"
+                }
+            ],
+            "End": true
+        },
+        "Fail": {
+            "Type": "Fail"
+        }
+    }
+}

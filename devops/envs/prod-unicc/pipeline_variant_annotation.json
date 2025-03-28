@@ -56,13 +56,11 @@
         },
         "ConcurrencyProtectionCheck": {
             "Type": "Choice",
-            "Choices": [
-                {
-                    "Variable": "$.ConcurrencyProtectionRuns.Count",
-                    "NumericGreaterThan": 1,
-                    "Next": "ConcurrencyProtectionTriggered"
-                }
-            ],
+            "Choices": [{
+                "Variable": "$.ConcurrencyProtectionRuns.Count",
+                "NumericGreaterThan": 1,
+                "Next": "ConcurrencyProtectionTriggered"
+            }],
             "Default": "PrepareStateMachinesArns"
         },
         "ConcurrencyProtectionTriggered": {
@@ -106,13 +104,11 @@
                     },
                     "GlobalConcurrencyProtectionCheck": {
                         "Type": "Choice",
-                        "Choices": [
-                            {
-                                "Variable": "$.GlobalConcurrencyProtectionRuns.Count",
-                                "NumericGreaterThan": 0,
-                                "Next": "GlobalConcurrencyProtectionTriggered"
-                            }
-                        ],
+                        "Choices": [{
+                            "Variable": "$.GlobalConcurrencyProtectionRuns.Count",
+                            "NumericGreaterThan": 0,
+                            "Next": "GlobalConcurrencyProtectionTriggered"
+                        }],
                         "Default": "GlobalConcurrencyProtectionPassed"
                     },
                     "GlobalConcurrencyProtectionTriggered": {
@@ -427,12 +423,12 @@
                             "StringMatches": "available"
                         }
                     ],
-                    "Next": "WaitMore"
+                    "Next": "waitMore"
                 }
             ],
             "Default": "waitAMinute"
         },
-        "WaitMore": {
+        "waitMore": {
             "Type": "Wait",
             "Seconds": 60,
             "Next": "parallelPrepareVariantsAndSnpEff"
@@ -474,16 +470,6 @@
                                                     "ASSEMBLY_ID.$": "$.AssemblyName"
                                                 }
                                             },
-                                            "Retry": [
-                                                {
-                                                    "ErrorEquals": [
-                                                        "States.TaskFailed"
-                                                    ],
-                                                    "IntervalSeconds": 10,
-                                                    "MaxAttempts": 5,
-                                                    "BackoffRate": 1
-                                                }
-                                            ],
                                             "End": true
                                         }
                                     }
@@ -599,8 +585,8 @@
                             "Resource": "arn:aws:states:::batch:submitJob.sync",
                             "Parameters": {
                                 "JobName": "extract-unannotated-variants",
-                                "JobDefinition.$": "$.VarianAnnotationDefinitions[2].BioPythonFargateArn",
-                                "JobQueue": "${FargateQueueArn}",
+                                "JobDefinition.$": "$.VarianAnnotationDefinitions[1].BioPythonEC2Arn",
+                                "JobQueue": "${EC2QueueArn}",
                                 "ContainerOverrides": {
                                     "Environment": [
                                         {
@@ -632,7 +618,7 @@
                                         },
                                         {
                                             "Type": "MEMORY",
-                                            "Value": "8192"
+                                            "Value.$": "$.LoadVariantAnnotationMemomy"
                                         }
                                     ]
                                 },
@@ -932,7 +918,7 @@
             ],
             "Next": "CheckFailureStatus"
         },
-        "CheckFailureStatus": {
+        "CheckFailureStatus":{
             "Type": "Choice",
             "Choices": [
                 {
@@ -942,9 +928,10 @@
                 }
             ],
             "Default": "ProcessDbTables"
+
         },
-        "FailEnd": {
-            "Type": "Fail"
+        "FailEnd":{
+            "Type":"Fail"
         },
         "ProcessDbTables": {
             "Type": "Task",
@@ -1189,20 +1176,6 @@
                     "REGION.$": "$.DbConnection.Region"
                 }
             },
-            "Next": "UpdateStatus"
-        },
-        "UpdateStatus": {
-            "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
-            "Parameters": {
-                "FunctionName": "${UpdateStatus}",
-                "Payload": {
-                    "DbConnection.$": "$.DbConnection",
-                    "CalledFunction": "run_query",
-                    "Query": "UPDATE submission_sample\n SET    bioanalysis_status = 'Annotated', bioanalysis_status_changed_at=now() \n WHERE bioanalysis_status = 'Inserted';"
-                }
-            },
-            "ResultPath": null,
             "Next": "WriteFormattedAnnotationPerGene"
         },
         "WriteFormattedAnnotationPerGene": {
@@ -1211,24 +1184,6 @@
             "Resource": "arn:aws:states:::glue:startJobRun.sync",
             "Parameters": {
                 "JobName": "${GlueWriteFormattedAnnotationPerGeneJobName}"
-            },
-            "Next": "RunPredictResistanceGlueJobV1"
-        },
-        "RunPredictResistanceGlueJobV1": {
-            "Type": "Task",
-            "ResultPath": null,
-            "Resource": "arn:aws:states:::glue:startJobRun.sync",
-            "Parameters": {
-                "JobName": "${GluePredictResistanceJobNameV1}"
-            },
-            "Next": "RunPredictResistanceGlueJobV2"
-        },
-        "RunPredictResistanceGlueJobV2": {
-            "Type": "Task",
-            "ResultPath": null,
-            "Resource": "arn:aws:states:::glue:startJobRun.sync",
-            "Parameters": {
-                "JobName": "${GluePredictResistanceJobNameV2}"
             },
             "End": true
         }

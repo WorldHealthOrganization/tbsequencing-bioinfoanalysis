@@ -23,12 +23,9 @@ module "pipeline_child" {
       Bedtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bedtools"]
       FastQC    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-FastQC"]
 
-      getSampleName            = module.bioanalysis-QueryRDS.lambda_function_arn
-      getLibraryIdsForSample   = module.bioanalysis-QueryRDS.lambda_function_arn
-      getLibraryCountForSample = module.bioanalysis-QueryRDS.lambda_function_arn
-      UpdateStatus             = module.bioanalysis-QueryRDS.lambda_function_arn
+      LambdaQueryRDS = module.bioanalysis-QueryRDS.lambda_function_arn
 
-      sequenceDataBucket = "${var.project_name}-main-${var.environment}-backend-sequence-data"
+      sequenceDataBucket = data.aws_ssm_parameter.sequence_data_bucket_name.value
   })
 
 
@@ -77,31 +74,22 @@ module "pipeline_master" {
   type              = "standard"
   definition = templatefile("pipeline_master.json",
     {
-      BioPython                    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
-      Bwa                          = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bwa"]
-      Samtools                     = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
-      Gatk                         = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
-      GetSamples                   = module.bioanalysis-QueryRDS.lambda_function_arn
-      PrepareSamples               = module.bioanalysis-QueryRDS.lambda_function_arn
-      UpdateStatus                 = module.bioanalysis-QueryRDS.lambda_function_arn
-      WorkflowVariantCallingArn    = module.pipeline_child.state_machine_arn
-      WorkflowDataInsertionArn     = module.pipeline_insert_processed_data.state_machine_arn
-      WorkflowVariantAnnotationArn = module.pipeline_variant_annotation.state_machine_arn
-      WorkflowStatsCalculationArn  = module.pipeline_calculate_statistics.state_machine_arn
-      OutputBucket                 = module.s3_for_fsx.bucket_id["fsx-export"]
-      LambdaQueryRDS               = module.bioanalysis-QueryRDS.lambda_function_arn
-      InstanceProfileRoleArn       = aws_iam_instance_profile.aws_iam_instance_profile.arn
-      ServiceRoleArn               = aws_iam_role.batch_service_role.arn
-      SecurityGroupId              = data.aws_security_group.batch-compute.id
-      SubnetId                     = data.aws_subnets.private-a.ids[0]
+      BioPython      = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
+      LambdaQueryRDS = module.bioanalysis-QueryRDS.lambda_function_arn
 
-      Project      = local.prefix
-      FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
-      AccountId    = local.account_id
-      Region       = local.aws_region
+      WorkflowVariantCallingArn       = module.pipeline_child.state_machine_arn
+      WorkflowDataInsertionArn        = module.pipeline_insert_processed_data.state_machine_arn
+      WorkflowVariantAnnotationArn    = module.pipeline_variant_annotation.state_machine_arn
+      WorkflowStatsCalculationArn     = module.pipeline_calculate_statistics.state_machine_arn
+      WorkflowFSxResourcesCreationArn = module.create_resources.state_machine_arn
+      WorkflowPrepareReferencesArn    = module.prepare_references.state_machine_arn
+      WorkflowFSxResourcesDeletionArn = module.delete_resources.state_machine_arn
 
-      FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
-      EC2QueueArn     = module.bioanalysis-queue-ec2.batch_job_queue_arn
+      OutputBucket = module.s3_for_fsx.bucket_id["fsx-export"]
+
+      Project   = local.prefix
+      AccountId = local.account_id
+      Region    = local.aws_region
 
       DbHost     = data.aws_ssm_parameter.db_host.value
       DbName     = data.aws_ssm_parameter.db_name.value
@@ -109,13 +97,7 @@ module "pipeline_master" {
       DbPassword = "RDS"
       DbPort     = "5432"
 
-      GlueGenotypeJobName      = module.glue.glue_job_name["genotype"]
-      GlueDellyGenotypeJobName = module.glue.glue_job_name["deletion"]
-      GlueDelVariantsJobName   = module.glue.glue_job_name["del_variants"]
-      GlueJoinGenotypeJobName  = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName      = module.glue.glue_job_name["taxonomy_assignment"]
-      GlueLocusStatsJobName    = module.glue.glue_job_name["locus_stats"]
-      GlueGlobalStatsJobName   = module.glue.glue_job_name["global_stats"]
+      GlueTaxonomyJobName = module.glue.glue_job_name["taxonomy_assignment"]
 
   })
 
@@ -175,13 +157,91 @@ data "aws_iam_policy_document" "master_pipeline" {
       "batch:deleteJobQueue",
       "batch:deleteComputeEnvironment",
       "ec2:deleteLaunchTemplate",
-      "states:ListExecutions"
+      "states:ListExecutions",
+      "tag:GetResources",
+      "glue:StartJobRun",
+      "glue:GetJobRun",
+      "glue:GetJobRuns",
+      "glue:BatchStopJobRun",
+      "glue:GetCrawlerMetrics",
+      "glue:StartCrawler",
+      "glue:GetCrawler",
+      "glue:GetCrawlers"
     ]
     resources = [
       "*",
     ]
   }
 }
+
+module "create_resources" {
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+
+  name              = "${local.prefix}-create-resources"
+  create_role       = false
+  use_existing_role = true
+  role_arn          = module.pipeline_master.role_arn
+  type              = "standard"
+  definition = templatefile("pipeline_create_resources.json",
+    {
+      OutputBucket           = module.s3_for_fsx.bucket_id["fsx-export"]
+      InstanceProfileRoleArn = aws_iam_instance_profile.aws_iam_instance_profile.arn
+      ServiceRoleArn         = aws_iam_role.batch_service_role.arn
+      SecurityGroupId        = data.aws_security_group.batch-compute.id
+      SubnetId               = data.aws_subnets.private-a.ids[0]
+
+      Project      = local.prefix
+      FleetRoleArn = aws_iam_role.batch_spot_fleet_role.arn
+      AccountId    = local.account_id
+      Region       = local.aws_region
+
+
+
+  })
+}
+
+module "prepare_references" {
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+
+  name              = "${local.prefix}-prepare-references"
+  create_role       = false
+  use_existing_role = true
+  role_arn          = module.pipeline_master.role_arn
+  type              = "standard"
+  definition = templatefile("pipeline_prepare_references.json",
+    {
+      BioPython = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-BioPython"]
+      Bwa       = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bwa"]
+      Samtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Samtools"]
+      Gatk      = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
+
+      Project   = local.prefix
+      AccountId = local.account_id
+      Region    = local.aws_region
+
+
+      DbHost     = data.aws_ssm_parameter.db_host.value
+      DbName     = data.aws_ssm_parameter.db_name.value
+      DbUser     = "rdsiamuser"
+      DbPassword = "RDS"
+      DbPort     = "5432"
+
+  })
+}
+
+module "delete_resources" {
+  source = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//step_functions?ref=step_functions-v1.1"
+
+  name              = "${local.prefix}-delete-resources"
+  create_role       = false
+  use_existing_role = true
+  role_arn          = module.pipeline_master.role_arn
+  type              = "standard"
+  definition = templatefile("pipeline_delete_resources.json",
+    {
+  })
+}
+
 
 # Insert Process data pipeline
 module "pipeline_insert_processed_data" {
@@ -199,13 +259,13 @@ module "pipeline_insert_processed_data" {
 
       FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
 
-      GlueGenotypeJobName      = module.glue.glue_job_name["genotype"]
-      GlueDellyGenotypeJobName = module.glue.glue_job_name["deletion"]
-      GlueDelVariantsJobName   = module.glue.glue_job_name["del_variants"]
-      GlueJoinGenotypeJobName  = module.glue.glue_job_name["join_genotype"]
-      GlueTaxonomyJobName      = module.glue.glue_job_name["taxonomy_assignment"]
-      GlueLocusStatsJobName    = module.glue.glue_job_name["locus_stats"]
-      GlueGlobalStatsJobName   = module.glue.glue_job_name["global_stats"]
+      GlueGenotypeJobName       = module.glue.glue_job_name["genotype"]
+      GlueNewVarGenotypeJobName = module.glue.glue_job_name["new_var_genotype"]
+      GlueDellyGenotypeJobName  = module.glue.glue_job_name["deletion"]
+      GlueDelVariantsJobName    = module.glue.glue_job_name["del_variants"]
+      GlueJoinGenotypeJobName   = module.glue.glue_job_name["join_genotype"]
+      GlueLocusStatsJobName     = module.glue.glue_job_name["locus_stats"]
+      GlueGlobalStatsJobName    = module.glue.glue_job_name["global_stats"]
 
       WorkflowVariantCallingArn    = "arn:aws:states:${local.aws_region}:${local.account_id}:stateMachine:${local.prefix}-${local.pipeline_variant_calling_name}"
       WorkflowVariantAnnotationArn = "arn:aws:states:${local.aws_region}:${local.account_id}:stateMachine:${local.prefix}-${local.pipeline_variant_annotation_name}"
@@ -282,8 +342,6 @@ module "pipeline_variant_annotation" {
       FargateQueueArn = module.bioanalysis-queue-fargate.batch_job_queue_arn
       EC2QueueArn     = module.bioanalysis-queue-ec2.batch_job_queue_arn
 
-      GluePredictResistanceJobNameV1             = module.glue.glue_job_name["predict_resistance"]
-      GluePredictResistanceJobNameV2             = module.glue.glue_job_name["predict_resistance_v2"]
       GlueWriteFormattedAnnotationPerGeneJobName = module.glue.glue_job_name["write_formatted_annotations_per_gene"]
 
       UpdateStatus = module.bioanalysis-QueryRDS.lambda_function_arn
@@ -367,6 +425,9 @@ module "pipeline_calculate_statistics" {
       FargateQueueArn  = module.bioanalysis-queue-fargate.batch_job_queue_arn
       BioPythonFargate = module.batch_job_definition_fargate.batch_job_fargate_definition_arn["${local.prefix}-BioPython-fargate"]
       StaticBucketArn  = data.aws_ssm_parameter.static_files_bucket_name.value
+
+      GluePredictResistanceJobNameV1 = module.glue.glue_job_name["predict_resistance"]
+      GluePredictResistanceJobNameV2 = module.glue.glue_job_name["predict_resistance_v2"]
 
   })
 

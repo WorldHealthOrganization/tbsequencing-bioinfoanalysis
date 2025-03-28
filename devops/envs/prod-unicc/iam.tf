@@ -30,6 +30,11 @@ resource "aws_iam_role_policy_attachment" "ecs_instance_role_attachment_s3" {
   role       = aws_iam_role.ecs_instance_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
 }
+resource "aws_iam_role_policy_attachment" "ecs_instance_role_attachment_rds" {
+  role       = aws_iam_role.ecs_instance_role.name
+  policy_arn = data.aws_iam_policy.rds_iam_access.arn
+}
+
 
 resource "aws_iam_instance_profile" "aws_iam_instance_profile" {
   name = "${local.prefix}-ecs-instance-profile"
@@ -218,7 +223,6 @@ data "aws_iam_policy_document" "glue_s3_access" {
       "s3:GetObject",
       "s3:PutObject"
     ]
-
     resources = [
       "arn:aws:s3:::${local.glue_jobs_bucket}/*"
     ]
