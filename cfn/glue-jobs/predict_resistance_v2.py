@@ -54,6 +54,20 @@ term = glueContext.create_data_frame.from_catalog(database = glue_db_name, table
 
 variant = glueContext.create_data_frame.from_catalog(database = glue_db_name, table_name = dbname+"_public_genphen_variant").alias("variant")
 
+fbiC_excluded_variants = (
+    variant
+    .where(
+        (F.col("position")==1305494)
+        & (F.col("alternative_nucleotide")=="C")
+        &
+            (
+            (F.col("reference_nucleotide")=="CGGCCTAGCCCCGGCGACGATGCCGGGTCGCGGGATGCGGCCCGTTGAGGAGCGGGGCAATCT")
+            | (F.col("reference_nucleotide")=="CGGCCTAGCCCCGGCGACGATGCCGGGTCGCGGGATGCGGCCCGTTGAGGAGCGGGGCAATCTGGCCTAGCCCCGGCGACGATGCCGGGTCGCGGGATGCGGCCCGTTGAGGAGCGGGGCAATCT")
+        )
+    )
+)
+
+
 tier = glueContext.create_data_frame.from_catalog(database = glue_db_name, table_name = dbname+"_public_genphen_genedrugresistanceassociation").alias("tier")
 
 variant_grades = (
@@ -138,6 +152,11 @@ promoter_distance = glueContext.create_data_frame.from_catalog(database = glue_d
 
 var_cat = (
     tiered_drug_variant_categories(fapg, san, tier, variant, mvd, promoter_distance, missense_codon_list(fapg, variant, tier), unpooling_fs=False)[0]
+    .join(
+        fbiC_excluded_variants,
+        on="variant_id",
+        how="left_anti"
+    )
     .drop(
         "position"
     )
