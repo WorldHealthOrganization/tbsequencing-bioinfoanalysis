@@ -629,6 +629,30 @@ if __name__=="__main__":
     #     .distinct()
     # )
 
+
+    #Excluding 2 deletions at the end of fbiC which do not impact the protein sequence
+    fbiC_excluded_variants = (
+        data_frame["variant"]
+        .where(
+            (F.col("position")==1305494)
+            & (F.col("alternative_nucleotide")=="C")
+            &
+                (
+                (F.col("reference_nucleotide")=="CGGCCTAGCCCCGGCGACGATGCCGGGTCGCGGGATGCGGCCCGTTGAGGAGCGGGGCAATCT")
+                | (F.col("reference_nucleotide")=="CGGCCTAGCCCCGGCGACGATGCCGGGTCGCGGGATGCGGCCCGTTGAGGAGCGGGGCAATCTGGCCTAGCCCCGGCGACGATGCCGGGTCGCGGGATGCGGCCCGTTGAGGAGCGGGGCAATCT")
+            )
+        )
+    )
+
+    var_cat = (
+        var_cat
+        .join(
+            fbiC_excluded_variants,
+            on="variant_id",
+            how="left_anti"
+        )
+    )
+
     data_frame["variantadditionalinfo"].show()
 
     v1_variant = ( 
