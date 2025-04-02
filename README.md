@@ -1,7 +1,13 @@
 # WHO Owner
 Owned by the Global Tuberculosis Programme, GTB, Geneva Switzerland. References: Carl-Michael Nathanson.
 
-# Bioinformatic processing
+# Overview
+This repository holds both terraform configuration files and python application code for handling the bioinformatic processing of samples as well as ETL for running the association algorithm.  
+
+This repository must be deployed after the main [infrastructure](https://github.com/finddx/tbsequencing-infrastructure) and [ncbi-sync](https://github.com/WorldHealthOrganization/tbsequencing-ncbi-sync) repositories.
+
+# Terraform 
+You can use a local backend for deploying, or the same S3 and DynamoDB backend you might have set up for the main infrastructure [repository](https://github.com/finddx/tbsequencing-infrastructure). Be careful to set a new key for the terraform state object. Refer to our [GitHub composite action](https://github.com/finddx/configure-terraform-backend/blob/main/action.yml) for reference for setting up the backend file.
 
 The repository holds definition for three different components of the bioinformatic processing:
 
