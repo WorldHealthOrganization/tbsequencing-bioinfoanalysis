@@ -15,16 +15,21 @@ You can check our GitHub Actions workflow in this repository for deploying each 
 Use terraform as usual to deploy the bioinformatic specific infrastructure. It will include:
 
 
-Eight Step Function States Machines that together enable the bioinformatic processing of the WGS Illumina data:
+1. Eight Step Function States Machines that together enable the bioinformatic processing of the WGS Illumina data:
 
-* Master, handling together all operations. Runs every day.
-* Creation of all the temporary AWS resources necessary to run a batch of bioinformatic analysis
-* Downloading of the references from NCBI (reference TB genome) after resources have been created
-* Child, which handles the processing of a single sample
-* Deletion of temporary AWS resources necessary for batched analysis
-* Data insertion, which will insert all newly created data (stored in S3) into our RDS database, after all samples have been processed
-* Variant Annotation, which will create and insert into the RDS database the annotation for the newly identified variants
+  * Master, handling together all operations. Runs every day.
+  * Creation of all the temporary AWS resources necessary to run a batch of bioinformatic analysis
+  * Downloading of the references from NCBI (reference TB genome) after resources have been created
+  * Child, which handles the processing of a single sample
+  * Deletion of temporary AWS resources necessary for batched analysis
+  * Data insertion, which will insert all newly created data (stored in S3) into our RDS database, after all samples have been processed
+  * Variant Annotation, which will create and insert into the RDS database the annotation for the newly identified variants
 
+2. Glue jobs definitions
+3. Eventbridge rule to schedule daily execution of the bioinformatic workflow
+4. AWS Batch resources for running specific jobs
+
+   
 ## Master pipeline
 1. Checks whether there are new samples to be processed (if not, stops there)
 2. Creates all the temporary infrastructure necessary to process the samples
