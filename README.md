@@ -5,9 +5,9 @@ Owned by the Global Tuberculosis Programme, GTB, Geneva Switzerland. References:
 
 The repository holds definition for three different components of the bioinformatic processing:
 
-1. The infrastructure terraform code
-2. Docker image definition used for sequencing data processing
-3. PySpark ETL jobs for post processing
+1. The infrastructure terraform code (_devops/envs/_)
+2. Docker image definition used for sequencing data processing (_containers/_)
+3. PySpark ETL jobs for post processing (_cfn/glue-jobs_)
 
 You can check our GitHub Actions workflow in this repository for deploying each component.
 
@@ -30,7 +30,7 @@ Use terraform as usual to deploy the bioinformatic specific infrastructure. It w
 4. AWS Batch resources for running specific jobs
 
    
-## Master pipeline
+### Master pipeline
 1. Checks whether there are new samples to be processed (if not, stops there)
 2. Creates all the temporary infrastructure necessary to process the samples
 3. Download all necessary reference files from the NCBI Child pipeline
@@ -39,7 +39,7 @@ Use terraform as usual to deploy the bioinformatic specific infrastructure. It w
 6. Deletes the temporary infrastructure
 7. Runs the data insertion, variant annotation, and calculate statistics states machines
 
-## Resources creation
+### Resources creation
 
 1. Creates an FSx volume
 2. Creates a launch template for EC2 instances so that the newly created FSx volume is mounted at start up
@@ -47,13 +47,13 @@ Use terraform as usual to deploy the bioinformatic specific infrastructure. It w
 4. Creates a new Batch Queue which is associated with the newly created Computational Environment 
 5. Waits for FSx drive to be ready (around 15 minutes)
 
-## Download references
+### Download references
 
 1. Downloads the reference TB genome from the NCBI
 2. Prepares all necessary indexes of the downloaded genome
 3. Extracts, compresses, indexes all known theoretical variants from the RDS database
 
-## Sample processing
+### Sample processing
 
 1. Downloads the raw sequencing data (either from NCBI or from our S3 bucket where contributors upload their data to the tbsequencing portal)
 2. Aligns to the reference (bwa) and sorts the alignment (samtools)
@@ -62,7 +62,7 @@ Use terraform as usual to deploy the bioinformatic specific infrastructure. It w
 5. Calculate per gene and global sequencing QC stats
 6. Identifies deletion (delly)
 
-## Data insertion
+### Data insertion
 
 Uses AWS Glue to insert from S3 files to RDS database:
 
@@ -72,7 +72,7 @@ Uses AWS Glue to insert from S3 files to RDS database:
 * taxonomy analysis stats
 
 
-## Variant annotation
+### Variant annotation
 
 * Creates temporary resources
 * Requests from the database new variants only (i.e. unannotated)
@@ -81,11 +81,14 @@ Uses AWS Glue to insert from S3 files to RDS database:
 * Annotates the new variants, transform them for loading into the database
 * Normalizes the newly inserted data
 
-## Calculate statistics pipeline
+### Calculate statistics pipeline
 
 Updates all tbsequencing web views. Runs AWS Glue jobs that assign drug resistance predictions from genotype data for the new samples only
 
 
 ## Docker images
 Specific open source bioinformatic tools will be needed for sequencing data analysis. These will need to be pushed in each of their respective AWS ECR that have been created by the main [infrastructure](https://github.com/finddx/tbsequencing-infrastructure) repository.
+
+## Glue Jobs
+We use Apache PySpark for most of our ETL logic. Some simply prepare data extracted from the bioinformatic analysis for insertion into the database, other prepare input files for the association algorithm.
 
