@@ -17,7 +17,7 @@ The repository holds definition for three different components of the bioinforma
 You can check our GitHub Actions workflow in this repository for deploying each component.
 
 ## Infrastructure
-You can use a local backend for deploying, or the same S3 and DynamoDB backend you might have set up for the main infrastructure [repository](https://github.com/finddx/tbsequencing-infrastructure). Be careful to set a new key for the terraform state object. We use GitHub Action secrets and command line arguments to set up the terraform backend for CICD.
+You can use a local backend for deploying, or the same S3 and DynamoDB backend you might have set up for the main infrastructure [repository](https://github.com/finddx/tbsequencing-infrastructure). Be careful to set a new key for the terraform state object. We use GitHub Action secrets and command line arguments to set up the terraform backend for CICD (see https://github.com/WorldHealthOrganization/tbsequencing-bioinfoanalysis/blob/main/.github/workflows/terraform-plan.yml and https://github.com/WorldHealthOrganization/tbsequencing-bioinfoanalysis/blob/main/.github/workflows/terraform-apply.yml).
 
 It will include:
 
