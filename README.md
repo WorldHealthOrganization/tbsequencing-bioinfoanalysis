@@ -34,6 +34,10 @@ Use terraform as usual to deploy the bioinformatic specific infrastructure. It w
 1. Checks whether there are new samples to be processed (if not, stops there)
 2. Creates all the temporary infrastructure necessary to process the samples
 3. Download all necessary reference files from the NCBI Child pipeline
+4. Starts and handle processing of the child pipeline for all queued samples (maximum concurrency is 40 samples)
+5. Copies to S3 from the temporary infrastructure all created files once processing for all samples is finished
+6. Deletes the temporary infrastructure
+7. Runs the data insertion, variant annotation, and calculate statistics states machines
 
 ## Resources creation
 
