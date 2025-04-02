@@ -52,7 +52,7 @@ Use terraform as usual to deploy the bioinformatic specific infrastructure. It w
 ## Sample processing
 
 1. Downloads the raw sequencing data (either from NCBI or from our S3 bucket where contributors upload their data to the tbsequencing portal)
-2. Aligns to the reference
+2. Aligns to the reference (bwa) and sorts the alignment (samtools)
 3. Performs taxonomy analysis
 4. Identifies genetic variants (gatk HaplotypeCaller, bcftools, freebayes)
 5. Calculate per gene and global sequencing QC stats
