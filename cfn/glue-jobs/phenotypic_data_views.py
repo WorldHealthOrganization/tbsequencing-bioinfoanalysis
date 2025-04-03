@@ -815,6 +815,9 @@ if __name__ == "__main__":
             F.when(
                 F.col("method_name").isNull(), F.col("medium_name")
             )
+            .when(
+                F.col("medium_name").isNull(), F.col("method_name")
+            )
             .otherwise(
                 F.concat(F.col("medium_name"), F.lit(" ("), F.col("method_name"), F.lit(")"))
             ).alias("medium_name"),
