@@ -14,20 +14,19 @@ The repository holds definition for three different components of the bioinforma
 2. Docker image definition used for sequencing data processing (_containers/_)
 3. PySpark ETL jobs for post processing (_cfn/glue-jobs_)
 
-You can check our GitHub Actions workflow in this repository for deploying each component.
+You can check our GitHub Action workflows in this repository for deploying each component.
 
 ## Infrastructure
 You can use a local backend for deploying, or the same S3 and DynamoDB backend you might have set up for the main infrastructure [repository](https://github.com/finddx/tbsequencing-infrastructure). Be careful to set a new key for the terraform state object. We use GitHub Action secrets and command line arguments to set up the terraform backend for CICD (see [terraform-plan](https://github.com/WorldHealthOrganization/tbsequencing-bioinfoanalysis/blob/main/.github/workflows/terraform-plan.yml) and [terraform-apply](https://github.com/WorldHealthOrganization/tbsequencing-bioinfoanalysis/blob/main/.github/workflows/terraform-apply.yml)).
 
-It will include:
-
+Infrastructure includes:
 
 1. Eight Step Function States Machines that together enable the bioinformatic processing of the WGS Illumina data:
 
   * Master, handling together all operations. Runs every day.
   * Creation of all the temporary AWS resources necessary to run a batch of bioinformatic analysis
   * Downloading of the references from NCBI (reference TB genome) after resources have been created
-  * Child, which handles the processing of a single sample
+  * Per sample bioinformatic processing
   * Deletion of temporary AWS resources necessary for batched analysis
   * Data insertion, which will insert all newly created data (stored in S3) into our RDS database, after all samples have been processed
   * Variant Annotation, which will create and insert into the RDS database the annotation for the newly identified variants
@@ -45,10 +44,12 @@ It will include:
 5. Copies to S3 from the temporary infrastructure all created files once processing for all samples is finished
 6. Deletes the temporary infrastructure
 7. Runs the data insertion, variant annotation, and calculate statistics states machines
+8. Updates bioinformatic status of processed samples
+
 
 ### Resources creation
 
-1. Creates an FSx volume
+1. Creates an FSx volume (shared storage for intermediate files during bioinformatic processing)
 2. Creates a launch template for EC2 instances so that the newly created FSx volume is mounted at start up
 3. Creates a new Batch Computational Environment, which starts EC2 spot instances using the newly created launch template
 4. Creates a new Batch Queue which is associated with the newly created Computational Environment 
@@ -68,6 +69,8 @@ It will include:
 4. Identifies genetic variants (gatk HaplotypeCaller, bcftools, freebayes)
 5. Calculate per gene and global sequencing QC stats
 6. Identifies deletion (delly)
+7. Formats all output files for RDS insertion via AWS Glue
+8. Updates samples bioinformatic status after successful or failed process
 
 ### Data insertion
 
@@ -81,12 +84,12 @@ Uses AWS Glue to insert from S3 files to RDS database:
 
 ### Variant annotation
 
-* Creates temporary resources
-* Requests from the database new variants only (i.e. unannotated)
-* Download references from the NCBI 
-* Processes references to create SnpEff configuration files
-* Annotates the new variants, transform them for loading into the database
-* Normalizes the newly inserted data
+1. Creates temporary resources
+2. Requests from the database new variants only (i.e. unannotated)
+3. Download references from the NCBI (gff format)
+4. Processes references and creates SnpEff configuration files
+5. Annotates the new variants, transform them for loading into the database
+6. Normalizes the newly inserted data
 
 ### Calculate statistics pipeline
 
