@@ -426,6 +426,8 @@ module "pipeline_calculate_statistics" {
       BioPythonFargate = module.batch_job_definition_fargate.batch_job_fargate_definition_arn["${local.prefix}-BioPython-fargate"]
       StaticBucketArn  = data.aws_ssm_parameter.static_files_bucket_name.value
 
+      Environment = var.environment
+
       GluePredictResistanceJobNameV1 = module.glue.glue_job_name["predict_resistance"]
       GluePredictResistanceJobNameV2 = module.glue.glue_job_name["predict_resistance_v2"]
 
@@ -463,7 +465,9 @@ data "aws_iam_policy_document" "pipeline_calculate_statistics" {
       "glue:GetJobRun",
       "glue:GetJobRuns",
       "glue:BatchStopJobRun",
-      "states:ListExecutions"
+      "states:ListExecutions",
+      "tag:GetResources",
+      "cloudfront:CreateInvalidation"
     ]
     resources = [
       "*"
