@@ -18,11 +18,13 @@
         },
         "ConcurrencyProtectionCheck": {
             "Type": "Choice",
-            "Choices": [{
-                "Variable": "$.ConcurrencyProtectionRuns.Count",
-                "NumericGreaterThan": 1,
-                "Next": "ConcurrencyProtectionTriggered"
-            }],
+            "Choices": [
+                {
+                    "Variable": "$.ConcurrencyProtectionRuns.Count",
+                    "NumericGreaterThan": 1,
+                    "Next": "ConcurrencyProtectionTriggered"
+                }
+            ],
             "Default": "RunPredictResistanceGlueJobV1"
         },
         "ConcurrencyProtectionTriggered": {
@@ -95,9 +97,48 @@
                     "REGION.$": "$.DbConnection.Region"
                 }
             },
+            "Next": "GetResources"
+        },
+        "GetResources": {
+            "Type": "Task",
+            "Parameters": {
+                "ResourceTypeFilters": [
+                    "cloudfront:distribution"
+                ],
+                "TagFilters": [
+                    {
+                        "Key": "Environment",
+                        "Values": [
+                            "${Environment}"
+                        ]
+                    }
+                ]
+            },
+            "ResultPath":"$.Cloudfront",
+            "ResultSelector": {
+                "DistributionArn.$": "States.StringSplit($.ResourceTagMappingList[0].ResourceARN, '/')"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:resourcegroupstaggingapi:getResources",
+            "Next": "CreateInvalidation"
+        },
+        "CreateInvalidation": {
+            "Type": "Task",
+            "ResultPath":null,
+            "Parameters": {
+                "DistributionId.$": "$.Cloudfront.DistributionArn[1]",
+                "InvalidationBatch": {
+                    "CallerReference": "$$.Execution.Name",
+                    "Paths": {
+                        "Quantity": 1,
+                        "Items": [
+                            "/static/media/GenotypeResistance.csv"
+                        ]
+                    }
+                }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:cloudfront:createInvalidation",
             "Next": "RefreshOverviewGene"
         },
-
         "RefreshOverviewGene": {
             "Type": "Task",
             "ResultPath": null,

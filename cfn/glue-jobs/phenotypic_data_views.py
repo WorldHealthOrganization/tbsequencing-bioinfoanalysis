@@ -179,9 +179,9 @@ def join_phenotypes_with_categories(phenotype, phenotype_category, drug, growth_
                 )
             )
         )
-        .where(
-            F.col("phenotypic_category").isNotNull()
-        )
+        # .where(
+        #     F.col("phenotypic_category").isNotNull()
+        # )
         .select(
             "phenotype.*",
             F.col("phenotypic_category")
@@ -434,7 +434,7 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
             ecoff_values.alias("ecoff"),
             on=(F.col("ecoff.drug_id")==F.col("mic.drug_id"))
                 & (F.col("mic.plate")==F.col("ecoff.medium_name")),
-            how="inner"
+            how="left"
         )
         # Same regexp, extract different groups
         # Cleaner than two different regexpes for each group
@@ -465,9 +465,9 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
             F.when(F.col("upper_boundary")<=F.col("ecoff.value"), 'S')
             .when(F.col("lower_boundary")>=F.col("ecoff.value"), 'R')
         )
-        .where(
-            F.col("test_result").isin('R', 'S')
-        )
+        # .where(
+        #     F.col("test_result").isin('R', 'S')
+        # )
         .select(
                 F.col("sample_id"),
                 F.col("mic.drug_id").alias("drug_id"),
@@ -478,8 +478,8 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
                     F.col("mic.plate")=="MYCOTB", F.lit("MYCOTB_MIC"))
                     .when(F.col("mic.plate").isin("UKMYC5", "UKMYC6"), F.lit("CRyPTIC_MIC"))
                     .when((F.col("drug_name")=="Pretomanid") & (F.col("mic.plate")=="MGIT"), F.lit("WHO_current"))
-                    .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result")))
-                .alias("phenotypic_category"),
+                    .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result"))
+                ).alias("phenotypic_category"),
         )
     )
     return(binarized_plates.alias(""))
@@ -573,8 +573,12 @@ def preparing_binary_data_for_final_algorithm(phenotypes, phenotypes_category, d
 
     # Select samples based on their phenotype 
     # Only keep clean samples (ie all results either R or S)
+    # and which have an attributed category
     categorized_phenotypes = (
         join_phenotypes_with_categories(phenotypes, phenotypes_category, drug, growth_medium, method)
+        .where(
+            F.col("phenotypic_category").isNotNull()
+        )
     )
 
     # Ofloxacin->levofloxacin, prothionamide->ethionamide
@@ -729,8 +733,19 @@ if __name__ == "__main__":
 
     data_frame = {}
     tables = {
-        "genphen":  ["pdstestcategory", "drug", "growthmedium", "pdsassessmentmethod", "epidemcutoffvalue", "genedrugresistanceassociation", "microdilutionplateconcentration"],
-        "submission" : ["pdstest", "mictest"]
+        "genphen":  [
+            "pdstestcategory",
+            "drug",
+            "growthmedium",
+            "pdsassessmentmethod",
+            "epidemcutoffvalue",
+            "genedrugresistanceassociation",
+            "microdilutionplateconcentration"
+        ],
+        "submission" : [
+            "pdstest",
+            "mictest"
+        ]
     }
 
 
@@ -749,6 +764,10 @@ if __name__ == "__main__":
         .withColumnRenamed(
             "range",
             "mic_value"
+        )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), "Middlebrook", "")
         )
     )
 
@@ -796,6 +815,9 @@ if __name__ == "__main__":
             F.when(
                 F.col("method_name").isNull(), F.col("medium_name")
             )
+            .when(
+                F.col("medium_name").isNull(), F.col("method_name")
+            )
             .otherwise(
                 F.concat(F.col("medium_name"), F.lit(" ("), F.col("method_name"), F.lit(")"))
             ).alias("medium_name"),
@@ -841,85 +863,85 @@ if __name__ == "__main__":
         )
     )
 
-    bin_mic_cc_cc_atu = filter_tests_for_CC_CC_ATU(
-        data_frame["mictest"],
-        data_frame["drug"]
-    ).drop("drug_name")
+    # bin_mic_cc_cc_atu = filter_tests_for_CC_CC_ATU(
+    #     data_frame["mictest"],
+    #     data_frame["drug"]
+    # ).drop("drug_name")
 
-    bin_mic_cc = rename_CC_CC_ATU_phenotypic_category(
-        binarize_mic_test(
-            bin_mic_cc_cc_atu,
-            data_frame["epidemcutoffvalue"],
-            data_frame["microdilutionplateconcentration"],
-            data_frame["drug"],
-            CC_ATU=False
-        ),
-        CC_ATU=False
-    )
+    # bin_mic_cc = rename_CC_CC_ATU_phenotypic_category(
+    #     binarize_mic_test(
+    #         bin_mic_cc_cc_atu,
+    #         data_frame["epidemcutoffvalue"],
+    #         data_frame["microdilutionplateconcentration"],
+    #         data_frame["drug"],
+    #         CC_ATU=False
+    #     ),
+    #     CC_ATU=False
+    # )
 
 
-    bin_mic_cc_counts = (
-        bin_mic_cc
-        .join(
-            data_frame["drug"],
-            "drug_id",
-            "inner"
-        )
-        .groupBy(
-            F.col("drug_name"),
-            F.col("plate"),
-            F.col("mic_value"),
-            F.col("phenotypic_category"),
-            F.col("test_result"),
-        )
-        .count()
-        .select(
-            F.col("drug_name"),
-            F.lit("MIC").alias("type"),
-            F.col("plate"),
-            F.col("mic_value"),
-            F.col("test_result"),
-            F.col("phenotypic_category"),
-            F.col("count")
-        )
-    )
+    # bin_mic_cc_counts = (
+    #     bin_mic_cc
+    #     .join(
+    #         data_frame["drug"],
+    #         "drug_id",
+    #         "inner"
+    #     )
+    #     .groupBy(
+    #         F.col("drug_name"),
+    #         F.col("plate"),
+    #         F.col("mic_value"),
+    #         F.col("phenotypic_category"),
+    #         F.col("test_result"),
+    #     )
+    #     .count()
+    #     .select(
+    #         F.col("drug_name"),
+    #         F.lit("MIC").alias("type"),
+    #         F.col("plate"),
+    #         F.col("mic_value"),
+    #         F.col("test_result"),
+    #         F.col("phenotypic_category"),
+    #         F.col("count")
+    #     )
+    # )
 
-    bin_mic_cc_atu = rename_CC_CC_ATU_phenotypic_category(
-        binarize_mic_test(
-            bin_mic_cc_cc_atu,
-            data_frame["epidemcutoffvalue"],
-            data_frame["microdilutionplateconcentration"],
-            data_frame["drug"],
-            CC_ATU=True
-        ),
-        CC_ATU=True
-    )
+    # bin_mic_cc_atu = rename_CC_CC_ATU_phenotypic_category(
+    #     binarize_mic_test(
+    #         bin_mic_cc_cc_atu,
+    #         data_frame["epidemcutoffvalue"],
+    #         data_frame["microdilutionplateconcentration"],
+    #         data_frame["drug"],
+    #         CC_ATU=True
+    #     ),
+    #     CC_ATU=True
+    # )
 
-    bin_mic_cc_atu_counts = (
-        bin_mic_cc_atu
-        .join(
-            data_frame["drug"],
-            "drug_id",
-            "inner"
-        )
-        .groupBy(
-            F.col("drug_name"),
-            F.col("plate"),
-            F.col("mic_value"),
-            F.col("phenotypic_category"),
-            F.col("test_result"),
-        )
-        .count()
-        .select(
-            F.col("drug_name"),
-            F.lit("MIC").alias("type"),
-            F.col("plate"),
-            F.col("mic_value"),
-            F.col("test_result"),
-            F.col("phenotypic_category"),
-            F.col("count")
-        )
-    )
+    # bin_mic_cc_atu_counts = (
+    #     bin_mic_cc_atu
+    #     .join(
+    #         data_frame["drug"],
+    #         "drug_id",
+    #         "inner"
+    #     )
+    #     .groupBy(
+    #         F.col("drug_name"),
+    #         F.col("plate"),
+    #         F.col("mic_value"),
+    #         F.col("phenotypic_category"),
+    #         F.col("test_result"),
+    #     )
+    #     .count()
+    #     .select(
+    #         F.col("drug_name"),
+    #         F.lit("MIC").alias("type"),
+    #         F.col("plate"),
+    #         F.col("mic_value"),
+    #         F.col("test_result"),
+    #         F.col("phenotypic_category"),
+    #         F.col("count")
+    #     )
+    # )
 
     s3 = boto3.resource('s3')
 
@@ -930,8 +952,8 @@ if __name__ == "__main__":
         writer = pandas.ExcelWriter(output, engine="openpyxl")
         categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
         mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
-        bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
-        bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
+        # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
+        # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
         writer.save()
         data = output.getvalue()
         s3.Bucket(bucket).put_object(Key=args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/categories.xlsx", Body=data)
@@ -947,6 +969,4 @@ if __name__ == "__main__":
 
         # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
         # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
-
-
 

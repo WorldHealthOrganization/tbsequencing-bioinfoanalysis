@@ -1,7 +1,7 @@
 resource "aws_cloudwatch_event_rule" "trigger_query" {
   name = "${var.project_name}-${var.module_name}-master-pipeline-schedule"
   # Read: https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html
-  schedule_expression = "rate(3 days)"
+  schedule_expression = "cron(0 12 * * ? *)"
   state               = "ENABLED"
 
 }
