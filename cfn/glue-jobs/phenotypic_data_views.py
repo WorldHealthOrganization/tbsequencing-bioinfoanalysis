@@ -865,85 +865,80 @@ if __name__ == "__main__":
         )
     )
 
-    # bin_mic_cc_cc_atu = filter_tests_for_CC_CC_ATU(
-    #     data_frame["mictest"],
-    #     data_frame["drug"]
-    # ).drop("drug_name")
+    datasets_proper_who = (
+        bin_mics
+        .alias("binarized")
+        .join(
+            data_frame["mictest"].alias("mic"),
+            on=F.col("binarized.mictest_id")==F.col("mic.id"),
+            how="inner"
+        )
+        .fillna(
+            "U",
+            subset="test_result",
+        )
+        .groupBy(
+            [
+                "package_id",
+                "mic.drug_id",
+                "mic.plate",
+            ]
+        )
+        .agg(
+            F.countDistinct("test_result"),
+            F.collect_set("test_result").alias("all_results"),
+        )
+        .where(
+            ~F.array_contains(F.col("all_results"), "U")
+            & F.col("mic.plate").isin(["MGIT", "LJ", "7H10", "7H11"])
+        )
+        .select(
+            F.col("package_id"),
+            F.col("mic.drug_id"),
+            F.col("mic.plate"),
+        )
+        .alias("proper")
+    )
 
-    # bin_mic_cc = rename_CC_CC_ATU_phenotypic_category(
-    #     binarize_mic_test(
-    #         bin_mic_cc_cc_atu,
-    #         data_frame["epidemcutoffvalue"],
-    #         data_frame["microdilutionplateconcentration"],
-    #         data_frame["drug"],
-    #         CC_ATU=False
-    #     ),
-    #     CC_ATU=False
-    # )
+    # mic counts corrected after update
 
-
-    # bin_mic_cc_counts = (
-    #     bin_mic_cc
-    #     .join(
-    #         data_frame["drug"],
-    #         "drug_id",
-    #         "inner"
-    #     )
-    #     .groupBy(
-    #         F.col("drug_name"),
-    #         F.col("plate"),
-    #         F.col("mic_value"),
-    #         F.col("phenotypic_category"),
-    #         F.col("test_result"),
-    #     )
-    #     .count()
-    #     .select(
-    #         F.col("drug_name"),
-    #         F.lit("MIC").alias("type"),
-    #         F.col("plate"),
-    #         F.col("mic_value"),
-    #         F.col("test_result"),
-    #         F.col("phenotypic_category"),
-    #         F.col("count")
-    #     )
-    # )
-
-    # bin_mic_cc_atu = rename_CC_CC_ATU_phenotypic_category(
-    #     binarize_mic_test(
-    #         bin_mic_cc_cc_atu,
-    #         data_frame["epidemcutoffvalue"],
-    #         data_frame["microdilutionplateconcentration"],
-    #         data_frame["drug"],
-    #         CC_ATU=True
-    #     ),
-    #     CC_ATU=True
-    # )
-
-    # bin_mic_cc_atu_counts = (
-    #     bin_mic_cc_atu
-    #     .join(
-    #         data_frame["drug"],
-    #         "drug_id",
-    #         "inner"
-    #     )
-    #     .groupBy(
-    #         F.col("drug_name"),
-    #         F.col("plate"),
-    #         F.col("mic_value"),
-    #         F.col("phenotypic_category"),
-    #         F.col("test_result"),
-    #     )
-    #     .count()
-    #     .select(
-    #         F.col("drug_name"),
-    #         F.lit("MIC").alias("type"),
-    #         F.col("plate"),
-    #         F.col("mic_value"),
-    #         F.col("test_result"),
-    #         F.col("phenotypic_category"),
-    #         F.col("count")
-    #     )
-    # )
+    mics_counts_corrected = (
+        bin_mics.alias("categorized_mics")
+        .join(
+            data_frame["mictest"].alias("mic"),
+            on=F.col("categorized_mics.mictest_id")==F.col("mic.id"),
+            how="inner"            
+        )
+        .join(
+            datasets_proper_who,
+            on=F.col("mic.package_id")==F.col("proper.package_id")
+                & F.col("categorized_mics.drug_id")==F.col("proper.drug_id")
+                & F.col("categorized_mics.plate")==F.col("proper.plate"),
+            how="left",
+        )
+        .withColumn(
+            "phenotype_category_corrected",
+            F.when(F.col("proper.plate").isNull(), F.col("phenotype_category"))
+            .otherwise(F.col("WHO_current"))
+        )
+        .groupBy(
+            F.col("drug_name"),
+            F.col("plate"),
+            F.col("mic_value"),
+            F.col("test_result"),
+            F.col("phenotype_category_corrected"),
+        )
+        .count(            
+        )
+        .select(
+            F.col("drug_name"),
+            F.lit("MIC").alias("type"),
+            F.col("plate"),
+            F.col("mic_value"),
+            F.col("test_result"),
+            F.col("phenotype_category_corrected")
+        )
+    )
 
 
     # now getting the number of unbinarized tests per packages
@@ -983,33 +978,6 @@ if __name__ == "__main__":
     )
 
     # now trying to extract the datasets that don't have U in their results
-    datasets_proper_who = (
-        bin_mics
-        .alias("binarized")
-        .join(
-            data_frame["mictest"].alias("mic"),
-            on=F.col("binarized.mictest_id")==F.col("mic.id"),
-            how="inner"
-        )
-        .fillna(
-            "U",
-            subset="test_result",
-        )
-        .groupBy(
-            [
-                "package_id",
-                "mic.drug_id",
-                "mic.plate",
-            ]
-        )
-        .agg(
-            F.countDistinct("test_result"),
-            F.collect_set("test_result").alias("all_results"),
-        )
-        .where(
-            ~F.array_contains(F.col("all_results"), "U")
-        )
-    )
 
     s3 = boto3.resource('s3')
 
@@ -1020,6 +988,7 @@ if __name__ == "__main__":
         writer = pandas.ExcelWriter(output, engine="openpyxl")
         categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
         mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
+        mics_counts_corrected.toPandas().to_excel(writer, sheet_name="MIC corrected", index=False)
         grouped_by_datasets.toPandas().to_excel(writer, sheet_name="Unbinarized", index=False)
         datasets_proper_who.toPandas().to_excel(writer, sheet_name="Proper", index=False)
         # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
