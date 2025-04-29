@@ -861,7 +861,8 @@ if __name__ == "__main__":
             F.col("plate"),
             F.col("mic_value"),
             F.col("test_result"),
-            F.col("phenotypic_category")
+            F.col("phenotypic_category"),
+            F.col("count")
         )
     )
 
@@ -931,7 +932,7 @@ if __name__ == "__main__":
             F.col("test_result"),
             F.col("phenotypic_category_corrected"),
         )
-        .count(            
+        .count(
         )
         .select(
             F.col("drug_name"),
@@ -939,13 +940,13 @@ if __name__ == "__main__":
             F.col("categorized_mics.plate"),
             F.col("categorized_mics.mic_value"),
             F.col("test_result"),
-            F.col("phenotypic_category_corrected")
+            F.col("phenotypic_category_corrected").alias("phenotypic_category"),
+            F.col("count")
         )
     )
 
 
     # now getting the number of unbinarized tests per packages
-
     grouped_by_datasets = (
         bin_mics
         .alias("binarized")
