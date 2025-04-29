@@ -976,6 +976,7 @@ if __name__ == "__main__":
                 "package.name",
                 "drug_name",
                 "drug.drug_id",
+                "mic.plate",
             ]            
         )
         .count()
