@@ -469,6 +469,7 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
         #     F.col("test_result").isin('R', 'S')
         # )
         .select(
+                F.col("mic.id").alias("mictest_id"),
                 F.col("sample_id"),
                 F.col("mic.drug_id").alias("drug_id"),
                 F.col("plate"),
@@ -744,7 +745,8 @@ if __name__ == "__main__":
         ],
         "submission" : [
             "pdstest",
-            "mictest"
+            "mictest",
+            "package",
         ]
     }
 
@@ -943,6 +945,42 @@ if __name__ == "__main__":
     #     )
     # )
 
+
+    # now getting the number of unbinarized tests per packages
+
+    grouped_by_datasets = (
+        bin_mics
+        .alias("binarized")
+        .join(
+            data_frame["mictest"].alias("mic"),
+            on=F.col("binarized.mictest_id")==F.col("mic.id"),
+            how="inner"
+        )
+        .join(
+            data_frame["drug"].alias("drug"),
+            on=F.col("binarized.drug_id")==F.col("drug.drug_id"),
+            how="inner"
+        )
+        .join(
+            data_frame["package"].alias("package"),
+            on=F.col("mic.package_id")==F.col("package.id"),
+            how="inner"
+        )
+        .where(
+            F.col("test_result").isNull()
+            | ~F.col("test_result").isin(["R", "S"])
+        )
+        .groupBy(
+            [
+                "package_id",
+                "package.name",
+                "drug_name",
+                "drug.drug_id",
+            ]            
+        )
+        .count()
+    )
+
     s3 = boto3.resource('s3')
 
     bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
@@ -952,6 +990,7 @@ if __name__ == "__main__":
         writer = pandas.ExcelWriter(output, engine="openpyxl")
         categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
         mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
+        grouped_by_datasets.toPandas().to_excel(writer, sheet_name="Unbinarized", index=False)
         # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
         # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
         writer.save()
@@ -969,4 +1008,3 @@ if __name__ == "__main__":
 
         # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
         # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
-
