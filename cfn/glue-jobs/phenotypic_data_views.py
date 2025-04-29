@@ -865,7 +865,7 @@ if __name__ == "__main__":
         )
     )
 
-    datasets_proper_who = (
+    recategorizing_mics = (
         bin_mics
         .alias("binarized")
         .join(
@@ -897,11 +897,9 @@ if __name__ == "__main__":
             F.col("mic.drug_id"),
             F.col("mic.plate"),
         )
-        .alias("proper")
     )
 
     # mic counts corrected after update
-
     mics_counts_corrected = (
         bin_mics.alias("categorized_mics")
         .join(
@@ -910,15 +908,15 @@ if __name__ == "__main__":
             how="inner"            
         )
         .join(
-            datasets_proper_who,
-            on=(F.col("mic.package_id")==F.col("proper.package_id"))
-                & (F.col("categorized_mics.drug_id")==F.col("proper.drug_id"))
-                & (F.col("categorized_mics.plate")==F.col("proper.plate")),
+            recategorizing_mics.alias("recat"),
+            on=(F.col("mic.package_id")==F.col("recat.package_id"))
+                & (F.col("categorized_mics.drug_id")==F.col("recat.drug_id"))
+                & (F.col("categorized_mics.plate")==F.col("recat.plate")),
             how="left",
         )
         .withColumn(
             "phenotypic_category_corrected",
-            F.when(F.col("proper.plate").isNull(), F.col("phenotypic_category"))
+            F.when(F.col("recat.plate").isNull(), F.col("phenotypic_category"))
             .otherwise(F.lit("WHO_current"))
         )
         .join(
@@ -995,7 +993,7 @@ if __name__ == "__main__":
         mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
         mics_counts_corrected.toPandas().to_excel(writer, sheet_name="MIC corrected", index=False)
         grouped_by_datasets.toPandas().to_excel(writer, sheet_name="Unbinarized", index=False)
-        datasets_proper_who.toPandas().to_excel(writer, sheet_name="Proper", index=False)
+        recategorizing_mics.toPandas().to_excel(writer, sheet_name="Recategorized", index=False)
         # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
         # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
         writer.save()
