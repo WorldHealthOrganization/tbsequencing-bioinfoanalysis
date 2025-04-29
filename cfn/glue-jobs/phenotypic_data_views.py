@@ -982,6 +982,35 @@ if __name__ == "__main__":
         .count()
     )
 
+    # now trying to extract the datasets that don't have U in their results
+    datasets_proper_who = (
+        bin_mics
+        .alias("binarized")
+        .join(
+            data_frame["mictest"].alias("mic"),
+            on=F.col("binarized.mictest_id")==F.col("mic.id"),
+            how="inner"
+        )
+        .fillna(
+            "U",
+            subset="test_result",
+        )
+        .groupBy(
+            [
+                "package_id",
+                "mic.drug_id",
+                "mic.plate",
+            ]
+        )
+        .agg(
+            F.countDistinct("test_result"),
+            F.collect_set("test_result").alias("all_results"),
+        )
+        .where(
+            ~F.array_contains(F.col("all_results"), "U")
+        )
+    )
+
     s3 = boto3.resource('s3')
 
     bucket = args["log_s3_bucket"].split("s3://")[1].strip("/")
@@ -992,6 +1021,7 @@ if __name__ == "__main__":
         categories_count.toPandas().to_excel(writer, sheet_name="Phen Cat Count", index=False)
         mics_counts.toPandas().to_excel(writer, sheet_name="MIC Cat Count", index=False)
         grouped_by_datasets.toPandas().to_excel(writer, sheet_name="Unbinarized", index=False)
+        datasets_proper_who.toPandas().to_excel(writer, sheet_name="Proper", index=False)
         # bin_mic_cc_counts.toPandas().to_excel(writer, sheet_name="CC", index=False)
         # bin_mic_cc_atu_counts.toPandas().to_excel(writer, sheet_name="CC-ATU", index=False)
         writer.save()
