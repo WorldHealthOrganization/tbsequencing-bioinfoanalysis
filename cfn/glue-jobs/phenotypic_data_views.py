@@ -911,32 +911,37 @@ if __name__ == "__main__":
         )
         .join(
             datasets_proper_who,
-            on=F.col("mic.package_id")==F.col("proper.package_id")
-                & F.col("categorized_mics.drug_id")==F.col("proper.drug_id")
-                & F.col("categorized_mics.plate")==F.col("proper.plate"),
+            on=(F.col("mic.package_id")==F.col("proper.package_id"))
+                & (F.col("categorized_mics.drug_id")==F.col("proper.drug_id"))
+                & (F.col("categorized_mics.plate")==F.col("proper.plate")),
             how="left",
         )
         .withColumn(
-            "phenotype_category_corrected",
-            F.when(F.col("proper.plate").isNull(), F.col("phenotype_category"))
-            .otherwise(F.col("WHO_current"))
+            "phenotypic_category_corrected",
+            F.when(F.col("proper.plate").isNull(), F.col("phenotypic_category"))
+            .otherwise(F.lit("WHO_current"))
+        )
+        .join(
+            data_frame["drug"].alias("drug"),
+            F.col("drug.drug_id")==F.col("categorized_mics.drug_id"),
+            "inner"
         )
         .groupBy(
             F.col("drug_name"),
-            F.col("plate"),
-            F.col("mic_value"),
+            F.col("categorized_mics.plate"),
+            F.col("categorized_mics.mic_value"),
             F.col("test_result"),
-            F.col("phenotype_category_corrected"),
+            F.col("phenotypic_category_corrected"),
         )
         .count(            
         )
         .select(
             F.col("drug_name"),
             F.lit("MIC").alias("type"),
-            F.col("plate"),
-            F.col("mic_value"),
+            F.col("categorized_mics.plate"),
+            F.col("categorized_mics.mic_value"),
             F.col("test_result"),
-            F.col("phenotype_category_corrected")
+            F.col("phenotypic_category_corrected")
         )
     )
 
