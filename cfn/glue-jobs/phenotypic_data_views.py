@@ -772,7 +772,7 @@ if __name__ == "__main__":
         )
         .withColumn(
             "plate",
-            F.regexp_replace(F.col("plate"), r"^Sensititre MYCOTB$", "")
+            F.regexp_replace(F.col("plate"), r"^Sensititre MYCOTB$", "MYCOTB")
         )
     )
 
