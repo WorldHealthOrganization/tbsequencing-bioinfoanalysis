@@ -476,7 +476,7 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
                 F.col("mic_value"),
                 F.col("test_result"),
                 F.when(
-                    F.col("mic.plate")=="MYCOTB", F.lit("MYCOTB_MIC"))
+                    F.col("mic.plate").isin(["MYCOTB", "Sensititre Custom AST Plates YUKMYC5"]), F.lit("MYCOTB_MIC"))
                     .when(F.col("mic.plate").isin("UKMYC5", "UKMYC6"), F.lit("CRyPTIC_MIC"))
                     .when((F.col("drug_name")=="Pretomanid") & (F.col("mic.plate")=="MGIT"), F.lit("WHO_current"))
                     .otherwise(F.concat(F.lit("non_WHO_CC_"), F.col("test_result"))
@@ -487,7 +487,6 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
 
 
 # These are specific filters asked by Paolo & Claudio for the CC/CC_ATU categories
-
 def filter_tests_for_CC_CC_ATU(mic, drug):
     bin_mic_cc_cc_atu = (
         mic.alias("mic_cc_cc-atu")
@@ -770,6 +769,10 @@ if __name__ == "__main__":
         .withColumn(
             "plate",
             F.regexp_replace(F.col("plate"), "Middlebrook", "")
+        )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), r"^Sensititre MYCOTB$", "")
         )
     )
 
