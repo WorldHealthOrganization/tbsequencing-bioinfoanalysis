@@ -773,6 +773,10 @@ if __name__ == "__main__":
             "plate",
             F.regexp_replace(F.col("plate"), r"^Sensititre MYCOTB$", "MYCOTB")
         )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), r"^Sensititre Custom AST Plates YUKMYC5$", "MYCOTB")
+        )
     )
 
     categorized_phenotypes = join_phenotypes_with_categories(
@@ -978,7 +982,7 @@ if __name__ == "__main__":
                 "drug_name",
                 "drug.drug_id",
                 "mic.plate",
-            ]            
+            ]
         )
         .count()
     )
