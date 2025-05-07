@@ -475,7 +475,7 @@ def binarize_mic_test(minimum_inhibitory_concentration, epidemiological_cutoff_v
                 F.col("plate"),
                 F.col("mic_value"),
                 F.col("test_result"),
-                F.when(F.col("mic.plate").isin("MYCOTB", "Sensititre Custom AST Plates YUKMYC5"), F.lit("MYCOTB_MIC"))
+                F.when(F.col("mic.plate").isin("MYCOTB"), F.lit("MYCOTB_MIC"))
                     .when(F.col("mic.plate").isin("UKMYC5", "UKMYC6"), F.lit("CRyPTIC_MIC"))
                     .when(~F.col("test_result").isNull(), F.concat(F.lit("non_WHO_CC_"), F.col("test_result")))
                     .otherwise(F.lit("to_be_excluded"))
