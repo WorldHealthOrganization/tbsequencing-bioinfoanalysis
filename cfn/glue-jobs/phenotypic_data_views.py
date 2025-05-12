@@ -20,6 +20,7 @@ from pyspark.sql.window import Window
 
 def join_phenotypes_with_categories(phenotype, phenotype_category, drug, growth_medium, assessment_method):
     # For each (drug id, medium id, method id) we select the WHO_current or WHO_past (ranked in that order) concentration if they exist
+    # this is necessary when we do the non_WHO_CC_[RS] classification
     select_who_cc = (
         phenotype_category
         .where(
