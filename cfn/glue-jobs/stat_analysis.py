@@ -704,7 +704,7 @@ if __name__=="__main__":
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/v1_matching/",
+            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/prev_version_matching/",
             "partitionKeys": [],
         }
     )
@@ -754,7 +754,7 @@ if __name__=="__main__":
         connection_type="s3",
         format="csv",
         connection_options={
-            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/v2_grades/",
+            "path": "s3://"+bucket +"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/prev_version_grades/",
             "partitionKeys": [],
         }
     )
