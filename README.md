@@ -100,5 +100,18 @@ Updates all tbsequencing web views. Runs AWS Glue jobs that assign drug resistan
 Specific open source bioinformatic tools will be needed for sequencing data analysis. These will need to be pushed in each of their respective AWS ECR that have been created by the main [infrastructure](https://github.com/finddx/tbsequencing-infrastructure) repository.
 
 ## Glue Jobs
-We use Apache PySpark for most of our ETL logic. Some simply prepare data extracted from the bioinformatic analysis for insertion into the database, other prepare input files for the association algorithm.
+We use Apache PySpark for most of our ETL logic. Some simply prepare data extracted from the bioinformatic analysis for insertion into the database, other prepare input files for the association algorithm. We will describe rapidly the most important glue ETL jobs.
+
+### BioSQL Gene Views
+Simple transforms relative to gene and protein names associated with genomic features. Never run as main process but other scripts import its defined functions
+
+### Phenotypic Data Views
+Transforms the raw inserted phenotype lab results (either binary R/S or MIC range values) into categorical results according to the expert rules. When running this scripts as main process, it will write an excel report on a S3 bucket which will show lab results counts for each drug/medium pairs, and their associated classification. Read as import by other scripts.
+
+### Variant Annotation Categorization
+Transforms the raw per variant annotation from the database into the final variant nomenclature used for the association algorithm, in the form *gene_name*_*variant_name* (e.g. rpoB_p.Ser450Leu). When running this script as the main process, it will write a very large excel file on an S3 bucket which will have the mapping between variant coordinates on the reference genome sequence and the final variant nomenclature, for all variant relevant to any genes that are selected as potentially linked to resistance for any drug. Imported by other scripts.
+
+### Stat Analysis 
+Extract tabular files ready for input for the association algorithm. It is built on most of the other ETL logic implemented in other files, and writes the tabular data on S3. Not imported by other scripts.
+
 
