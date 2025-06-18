@@ -252,6 +252,7 @@ if __name__=="__main__":
                     "sequencingdata",
                     "sample",
                     "summarysequencingstats",
+                    "samplealias",
                 ]
             }
     }
@@ -536,16 +537,58 @@ if __name__=="__main__":
         )
     )
 
-    samples_per_country = (
+    sample_country = (
         filtered_samples_drug_phenotypes_box
+        .select(
+            F.col("sample_id")
+        )
+        .distinct()
         .join(
             data_frame["sample"].alias("sample"),
             on="sample_id",
-            how="inner",
+            how="left",
+        )
+        .select(
+            F.col("sample_id"),
+            F.col("country_id")
+        )
+    )
+
+    samplealias_country = (
+        filtered_samples_drug_phenotypes_box
+        .select(
+            F.col("sample_id")
+        )
+        .distinct()
+        .join(
+            data_frame["samplealias"].alias("alias"),
+            on="sample_id",
+            how="left",
+        )
+        .select(
+            F.col("sample_id"),
+            F.col("country_id")
+        )
+    )
+
+    samples_per_country = (
+        sample_country
+        .unionByName(
+            samplealias_country
+        )
+        .alias("union")
+        .groupby(
+            F.col("sample_id")
+        )
+        .agg(
+            F.first("country_id", ignorenulls=True).alias("country_id")
+        )
+        .groupby(
+            F.col("country_id")
         )
         .join(
             data_frame["country"].alias("country"),
-            F.col("sample.country_id")==F.col("country.three_letters_code"),
+            F.col("union.country_id")==F.col("country.three_letters_code"),
             how="left"
         )
         .groupby(
