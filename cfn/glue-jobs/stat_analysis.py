@@ -576,13 +576,13 @@ if __name__=="__main__":
         .unionByName(
             samplealias_country
         )
-        .alias("union")
         .groupby(
             F.col("sample_id")
         )
         .agg(
             F.first("country_id", ignorenulls=True).alias("country_id")
         )
+        .alias("union")
         .join(
             data_frame["country"].alias("country"),
             F.col("union.country_id")==F.col("country.three_letters_code"),
