@@ -583,9 +583,6 @@ if __name__=="__main__":
         .agg(
             F.first("country_id", ignorenulls=True).alias("country_id")
         )
-        .groupby(
-            F.col("country_id")
-        )
         .join(
             data_frame["country"].alias("country"),
             F.col("union.country_id")==F.col("country.three_letters_code"),
