@@ -250,7 +250,7 @@ lofs_variants = (
         F.col("drug_id"),
         F.lit(2).alias("grade")
     )
-    .distinct()   
+    .distinct()
 )
 
 
@@ -303,8 +303,9 @@ rpoB_variants = (
     .where(
         (F.col("resolved_symbol")=="rpoB")
         & (F.col("predicted_effect")!="synonymous_variant")
-        & (F.col("distance_to_reference")>=426)
-        & (F.col("distance_to_reference")<=452)
+        & (F.col("predicted_effect")!="upstream_gene_variant")
+        & (F.floor(1+(F.col("distance_to_reference")-1)/3)>=426)
+        & (F.floor(1+(F.col("distance_to_reference")-1)/3)<=452)
     )
     .join(
         v2_grading,
@@ -415,9 +416,6 @@ cov = (
         F.concat(F.col("resolved_symbol"), F.lit("_deletion")).alias("variant_catalogue_name")
     )
 )
-
-print(cov)
-
 
 # genotypes_of_interest
 genotype = (
