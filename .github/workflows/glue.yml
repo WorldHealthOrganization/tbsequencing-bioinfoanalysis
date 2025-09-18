@@ -26,5 +26,5 @@ jobs:
           mask-aws-account-id: true
       - run: |
           cd ./cfn/glue-jobs/
-          zip -r9 ETL_tools.zip biosql_gene_views.py variant_annotation_categorization.py phenotypic_data_views.py
+          zip -r9 ETL_tools.zip biosql_gene_views.py variant_annotation_categorization.py phenotypic_data_views.py call_lineages.py
           aws s3 cp ./  s3://${{secrets.GLUE_BUCKET}}/glue-jobs/ --recursive
