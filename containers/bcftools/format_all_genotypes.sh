@@ -2,7 +2,12 @@
 
 sample_id=$(basename $1)
 reference_name=$2
-rm -f genotype/${sample_id}-genotype.csv*
+
+if [ -f genotype/${sample_id}-genotype.csv ] || [ -f genotype/${sample_id}-genotype.csv.gz ]
+then
+  sleep 180s
+  rm -f genotype/${sample_id}-genotype.csv*
+fi
 
 for genotyper in freebayes gatk bcftools
 do
