@@ -93,7 +93,7 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
             subset="af"
         )
         .groupBy(
-            "sample_id",
+            "sample.sample_id",
             "position",
             "count_presence",
             "lineage_id",
