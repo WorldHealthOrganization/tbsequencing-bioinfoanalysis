@@ -164,13 +164,13 @@ module "bioanalysis-env-fargate" {
 
 #batch queue
 module "bioanalysis-queue-fargate" {
-  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.1"
   queue_name           = "${local.prefix}-fargate"
   compute_environments = module.bioanalysis-env-fargate.arn
 }
 
 module "bioanalysis-queue-ec2" {
-  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.1"
   queue_name           = "${local.prefix}-ec2"
   compute_environments = module.bioanalysis-env-ec2.batch_compute_environment_arn
 }
