@@ -15,6 +15,7 @@ import pyspark.sql.functions as F
 from phenotypic_data_views import *
 from biosql_gene_views import *
 from variant_annotation_categorization import *
+from call_lineages import *
 
 def solo_extraction(genotype_categorized, position, filtered_sample_drug, loc_seq_stats, drug, gene_locus_tag, tier, bucket, orphan=False):
 
@@ -212,7 +213,7 @@ if __name__=="__main__":
 
     d = datetime.datetime.now().isoformat().replace(":", "-")
 
-    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "unpool_frameshifts", "TempDir"])
+    args = getResolvedOptions(sys.argv, ['JOB_NAME', "postgres_db_name", "glue_db_name", "unpool_frameshifts", "TempDir", "rds_glue_connection_name"])
 
     glueContext = GlueContext(SparkContext.getOrCreate())
     spark = glueContext.spark_session
@@ -223,6 +224,9 @@ if __name__=="__main__":
 
     dbname = args["postgres_db_name"]
     glue_dbname = args["glue_db_name"]
+    rds_connector_name = args["rds_glue_connection_name"]
+
+    conn = glueContext.extract_jdbc_conf(rds_connector_name)
 
     data_frame = {}
     tables = { 
@@ -242,7 +246,9 @@ if __name__=="__main__":
                     "variant",
                     "variantadditionalinfo",
                     "country",
-                    "variantgrade"
+                    "variantgrade",
+                    "variantlineageassociation",
+                    "lineage"
                     ],
                 "submission" : [
                     "pdstest",
@@ -631,6 +637,27 @@ if __name__=="__main__":
         .distinct()
         .alias("filtered_samples")
     )
+
+    # Now do the lineage marker stuff
+
+    assign_lineage_markers_to_variant_id(data_frame["variantlineageassociation"].alias("lineage_marker"), data_frame["variant"].alias("variant"), dbname, conn)
+
+    sample_x_lineage = generate_lineage_marker_counts(data_frame["variantlineageassociation"].alias("lineage_marker"), data_frame["lineage"].alias("lineage"), data_frame["sample"].alias("sample"), data_frame["genotype"].alias("genotype"))
+
+    glueContext.write_dynamic_frame.from_options(
+        frame=DynamicFrame.fromDF(
+            sample_x_lineage,
+            glueContext,
+            "final"
+        ),
+        connection_type="s3",
+        format="csv",
+        connection_options={
+            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/lineages_counts/",
+            "partitionKeys": []
+        }
+    )
+
 
     protein_id = protein_id_view(data_frame["dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature_dbxref"]).alias("protein_id")
 
