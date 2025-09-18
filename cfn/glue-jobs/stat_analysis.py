@@ -646,7 +646,7 @@ if __name__=="__main__":
 
     glueContext.write_dynamic_frame.from_options(
         frame=DynamicFrame.fromDF(
-            sample_x_lineage,
+            sample_x_lineage.coalesce(1),
             glueContext,
             "final"
         ),
