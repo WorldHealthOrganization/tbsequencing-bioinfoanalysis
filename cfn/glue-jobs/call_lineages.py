@@ -79,7 +79,7 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
         .join(
             genotype,
             on = 
-                (F.col("sample.id")==F.col("genotype.sample_id"))
+                (F.col("sample.sample_id")==F.col("genotype.sample_id"))
                 & (F.col("genotype.variant_id")==F.col("marker.variant_id"))
                 & (F.col("genotype.genotyper")=="bcftools"),
             how="left"
