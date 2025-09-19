@@ -118,7 +118,7 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
         sample_x_markers
         .join(
             lineage_name,
-            on=F.col("lineage_id")==F.col("lineage_name.id"),
+            on=F.col("lineage_id")==F.col("lineage.id"),
             how="inner"
         )
     )
