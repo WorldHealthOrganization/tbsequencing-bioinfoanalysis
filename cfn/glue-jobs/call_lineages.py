@@ -85,7 +85,7 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
             how="left"
         )
         .withColumn(
-        "af",
+            "af",
             F.bround(F.col("alternative_ad").cast("long")/F.col("total_dp").cast("long"), 2)
         )
         .fillna(
@@ -103,8 +103,14 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
         )
         .withColumn(
             "final_af",
-            F.when(F.col("count_presence"), "sum(af)")
-            .otherwise(1-F.col("sum(af)"))
+            F.bround(
+                F.when(F.col("count_presence"), F.col("sum(af)"))
+                .otherwise(1-F.col("sum(af)")),
+                2
+            )
+        )
+        .where(
+            F.col("final_af")
         )
         .select(
             F.col("sample_id"),
@@ -120,6 +126,12 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
             lineage_name,
             on=F.col("lineage_id")==F.col("lineage.id"),
             how="inner"
+        )
+        .select(
+            F.col("sample_id"),
+            F.col("position"),
+            F.col("lineage_numbering"),
+            F.col("final_af"),
         )
     )
 
