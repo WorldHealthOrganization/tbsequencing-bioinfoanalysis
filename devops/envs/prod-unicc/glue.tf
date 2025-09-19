@@ -415,6 +415,7 @@ locals {
         "--additional-python-modules" = "openpyxl==3.0.10",
         "--extra-py-files"            = "s3://${local.glue_jobs_bucket}/glue-jobs/ETL_tools.zip",
         "--TempDir"                   = "s3://${module.s3_for_fsx.bucket_id["glue-logs-bucket"]}/",
+        "--rds_glue_connection_name"  = module.glue.glue_connection_name["glue_connection"],
       }
       script_location = "s3://${local.glue_jobs_bucket}/glue-jobs/stat_analysis.py"
     }

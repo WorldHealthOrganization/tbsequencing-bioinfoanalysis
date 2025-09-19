@@ -140,7 +140,7 @@ locals {
 
 #Batch ENVS
 module "bioanalysis-env-ec2" {
-  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_compute_env_ec2?ref=batch_compute_env_ec2-v2.1"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_compute_env_ec2?ref=batch_compute_env_ec2-v2.2"
   batch_name           = "${local.prefix}-ec2"
   launch_template_name = "${local.prefix}-ec2"
   environment          = local.prefix
@@ -154,7 +154,7 @@ module "bioanalysis-env-ec2" {
 }
 
 module "bioanalysis-env-fargate" {
-  source            = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_compute_env_fargate?ref=batch_compute_env_fargate-v2.1"
+  source            = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_compute_env_fargate?ref=batch_compute_env_fargate-v2.2"
   compute_env_name  = "${local.prefix}-fargate"
   service_role_name = aws_iam_role.batch_service_role.name
   service_role_arn  = aws_iam_role.batch_service_role.arn
@@ -164,13 +164,13 @@ module "bioanalysis-env-fargate" {
 
 #batch queue
 module "bioanalysis-queue-fargate" {
-  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.1"
   queue_name           = "${local.prefix}-fargate"
   compute_environments = module.bioanalysis-env-fargate.arn
 }
 
 module "bioanalysis-queue-ec2" {
-  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.0"
+  source               = "git::https://github.com/finddx/seq-treat-tbkb-terraform-modules.git//batch_queue?ref=batch_queue-v2.1"
   queue_name           = "${local.prefix}-ec2"
   compute_environments = module.bioanalysis-env-ec2.batch_compute_environment_arn
 }
