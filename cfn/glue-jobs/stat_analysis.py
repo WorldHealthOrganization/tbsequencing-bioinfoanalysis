@@ -650,6 +650,48 @@ if __name__=="__main__":
         .distinct()
     )
 
+    # Now get all sample alias and library names and library paths out 
+    #  
+    
+
+    identifiers = (
+        only_samples
+        .alias("sample")
+        .join(
+            data_frame["samplealias"].alias("alias"),
+            on=F.col("sample.id")==F.col("alias.sample_id"),
+            how="left"
+        )
+        .join(
+            data_frame["sequencingdata"].alias("sequencing"),
+            on = F.col("sample.id")==F.col("sequencing.sample_id"),
+            how="left"
+        )
+        .groupBy(
+            F.col("sample.id")
+        )
+        .agg(
+            F.concat_ws(", "), F.collect_set(F.col("alias.name")),
+            F.concat_ws(", "), F.collect_set(F.col("alias.fastq_prefix")),
+            F.concat_ws(", "), F.collect_set(F.col("alias.library_name")),
+        )
+    )
+
+    glueContext.write_dynamic_frame.from_options(
+        frame=DynamicFrame.fromDF(
+            identifiers.coalesce(1),
+            glueContext,
+            "final"
+        ),
+        connection_type="s3",
+        format="csv",
+        connection_options={
+            "path": "s3://"+bucket+"/"+args["JOB_NAME"]+"/"+d+"_"+args["JOB_RUN_ID"]+"/identifiers/",
+            "partitionKeys": []
+        }
+    )
+
+
     sample_x_lineage = generate_lineage_marker_counts(data_frame["variantlineageassociation"].alias("lineage_marker"), data_frame["lineage"].alias("lineage"), only_samples.alias("sample"), data_frame["genotype"].alias("genotype"))
 
     glueContext.write_dynamic_frame.from_options(
@@ -665,6 +707,8 @@ if __name__=="__main__":
             "partitionKeys": []
         }
     )
+
+    
 
 
     protein_id = protein_id_view(data_frame["dbxref"], data_frame["seqfeature_qualifier_value"], data_frame["seqfeature_dbxref"]).alias("protein_id")
