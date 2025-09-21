@@ -659,16 +659,16 @@ if __name__=="__main__":
         .alias("sample")
         .join(
             data_frame["samplealias"].alias("alias"),
-            on=F.col("sample.id")==F.col("alias.sample_id"),
+            on=F.col("sample.sample_id")==F.col("alias.sample_id"),
             how="left"
         )
         .join(
             data_frame["sequencingdata"].alias("sequencing"),
-            on = F.col("sample.id")==F.col("sequencing.sample_id"),
+            on = F.col("sample.sample_id")==F.col("sequencing.sample_id"),
             how="left"
         )
         .groupBy(
-            F.col("sample.id")
+            F.col("sample.sample_id")
         )
         .agg(
             F.concat_ws(", "), F.collect_set(F.col("alias.name")),
