@@ -671,9 +671,9 @@ if __name__=="__main__":
             F.col("sample.sample_id")
         )
         .agg(
-            F.concat_ws(", "), F.collect_set(F.col("alias.name")),
-            F.concat_ws(", "), F.collect_set(F.col("alias.fastq_prefix")),
-            F.concat_ws(", "), F.collect_set(F.col("sequencing.library_name")),
+            F.concat_ws(", ", F.collect_set(F.col("alias.name"))),
+            F.concat_ws(", ", F.collect_set(F.col("alias.fastq_prefix"))),
+            F.concat_ws(", ", F.collect_set(F.col("sequencing.library_name"))),
         )
     )
 
