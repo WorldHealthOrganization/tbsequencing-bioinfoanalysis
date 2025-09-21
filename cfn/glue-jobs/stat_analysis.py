@@ -642,7 +642,15 @@ if __name__=="__main__":
 
     assign_lineage_markers_to_variant_id(data_frame["variantlineageassociation"].alias("lineage_marker"), data_frame["variant"].alias("variant"), dbname, conn)
 
-    sample_x_lineage = generate_lineage_marker_counts(data_frame["variantlineageassociation"].alias("lineage_marker"), data_frame["lineage"].alias("lineage"), data_frame["sample"].alias("sample"), data_frame["genotype"].alias("genotype"))
+    only_samples = (
+        filt_samp_drug
+        .select(
+            F.col("sample_id")
+        )
+        .distinct()
+    )
+
+    sample_x_lineage = generate_lineage_marker_counts(data_frame["variantlineageassociation"].alias("lineage_marker"), data_frame["lineage"].alias("lineage"), only_samples.alias("sample"), data_frame["genotype"].alias("genotype"))
 
     glueContext.write_dynamic_frame.from_options(
         frame=DynamicFrame.fromDF(
