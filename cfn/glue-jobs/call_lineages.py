@@ -110,7 +110,7 @@ def generate_lineage_marker_counts(lineage_markers, lineage_name, sample, genoty
             )
         )
         .where(
-            F.col("final_af")
+            F.col("final_af")>0
         )
         .select(
             F.col("sample_id"),
