@@ -364,6 +364,39 @@
                                 "BackoffRate": 2
                             }
                         ],
+                        "Next": "CleanupNormalizedFastq"
+                    },
+                    "CleanupNormalizedFastq": {
+                        "Type": "Task",
+                        "ResultPath": null,
+                        "Resource": "arn:aws:states:::batch:submitJob.sync",
+                        "Parameters": {
+                            "JobName": "cleanup-normalized-fastq",
+                            "JobDefinition": "${Seqkit}",
+                            "JobQueue.$": "$.JobQueueArn",
+                            "ContainerOverrides": {
+                                "Command": [
+                                    "/bin/bash",
+                                    "/scripts/cleanup_normalized_fastq.sh",
+                                    "Ref::SAMPLE_ID",
+                                    "Ref::FASTQ_ID"
+                                ]
+                            },
+                            "Parameters": {
+                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
+                                "FASTQ_ID.$": "$.FastqId"
+                            }
+                        },
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Batch.AWSBatchException"
+                                ],
+                                "IntervalSeconds": 5,
+                                "MaxAttempts": 10,
+                                "BackoffRate": 2
+                            }
+                        ],
                         "Next": "ParallelFastQC"
                     },
                     "ParallelFastQC": {
