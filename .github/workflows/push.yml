@@ -151,3 +151,13 @@ jobs:
       rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
     secrets:
       AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+
+  build_push_db-seqkit:
+    uses: finddx/seq-treat-tbkb-github-workflows/.github/workflows/build_push.yml@main
+    with:
+      environment:  ${{ github.event.inputs.environment }}
+      repo_name: genomicsworkflow-seqkit
+      workdir: containers/seqkit
+      rolename: ${{startsWith(inputs.environment, 'prod') && 'push-glue' || 'push-docker-image'}}
+    secrets:
+      AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
