@@ -86,6 +86,15 @@ locals {
       container_vcpu   = "1"
       container_memory = "4096"
     }
+    "${local.prefix}-Seqkit" = {
+      image = "${local.account_id}.dkr.ecr.${local.aws_region}.amazonaws.com/${var.project_name}-genomicsworkflow-seqkit:latest"
+      command = [
+        "echo",
+        "test",
+      ]
+      container_vcpu   = "1"
+      container_memory = "4096"
+    }
     "${local.prefix}-Delly" = {
       image = "${local.account_id}.dkr.ecr.${local.aws_region}.amazonaws.com/${var.project_name}-genomicsworkflow-delly:latest"
       command = [
