@@ -383,7 +383,7 @@
                                 ]
                             },
                             "Parameters": {
-                                "SAMPLE_ID.$": "States.Format('{}', $.SampleId)",
+                                "SAMPLE_ID.$": "$.SampleId",
                                 "FASTQ_ID.$": "$.FastqId"
                             }
                         },
