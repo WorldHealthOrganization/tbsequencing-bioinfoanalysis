@@ -6,8 +6,6 @@ set -euo pipefail
 SAMPLE_ID="$1"
 FASTQ_ID="$2"
 
-cd "$SAMPLE_ID"
-
 # create a list of reads present in both files
 seqkit common $SAMPLE_ID/${FASTQ_ID}_1.fastq.gz $SAMPLE_ID/${FASTQ_ID}_2.fastq.gz | seqkit seq -n -i > $SAMPLE_ID/common_reads.txt
 
