@@ -18,7 +18,7 @@ module "pipeline_child" {
       Gatk      = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Gatk"]
       Freebayes = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Freebayes"]
       Sratools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Sratools"]
-      Seqkit  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Seqkit"]
+      Seqkit    = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Seqkit"]
       Delly     = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Delly"]
       Mosdepth  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Mosdepth"]
       Bedtools  = module.batch_job_definition_ec2.batch_job_definition_arn["${local.prefix}-Bedtools"]
