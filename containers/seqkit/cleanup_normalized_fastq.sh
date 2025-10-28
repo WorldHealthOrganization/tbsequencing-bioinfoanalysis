@@ -6,7 +6,7 @@ set -euo pipefail
 SAMPLE_ID="$1"
 FASTQ_ID="$2"
 
-# create a list of reads present in both files
+# create paired read files with only reads that have a mate
 seqkit pair -1 $SAMPLE_ID/${FASTQ_ID}_1.fastq -2 $SAMPLE_ID/${FASTQ_ID}_2.fastq 
 
 # replace original files with paired reads only
