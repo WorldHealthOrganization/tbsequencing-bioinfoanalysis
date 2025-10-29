@@ -6,14 +6,9 @@ set -euo pipefail
 SAMPLE_ID="$1"
 FASTQ_ID="$2"
 
-# create a list of reads present in both files
-seqkit common $SAMPLE_ID/${FASTQ_ID}_1.fastq $SAMPLE_ID/${FASTQ_ID}_2.fastq | seqkit seq -n -i > $SAMPLE_ID/common_reads.txt
+# create paired read files with only reads that have a mate
+seqkit pair -1 $SAMPLE_ID/${FASTQ_ID}_1.fastq -2 $SAMPLE_ID/${FASTQ_ID}_2.fastq 
 
-# filter R1 and R2 using the common reads list, compress to new files
-seqkit grep -f $SAMPLE_ID/common_reads.txt $SAMPLE_ID/${FASTQ_ID}_1.fastq > $SAMPLE_ID/${FASTQ_ID}_cleaned_1.fastq
-seqkit grep -f $SAMPLE_ID/common_reads.txt $SAMPLE_ID/${FASTQ_ID}_2.fastq > $SAMPLE_ID/${FASTQ_ID}_cleaned_2.fastq
-
-mv $SAMPLE_ID/${FASTQ_ID}_cleaned_1.fastq $SAMPLE_ID/${FASTQ_ID}_1.fastq
-mv $SAMPLE_ID/${FASTQ_ID}_cleaned_2.fastq $SAMPLE_ID/${FASTQ_ID}_2.fastq
-
-rm $SAMPLE_ID/common_reads.txt
+# replace original files with paired reads only
+mv $SAMPLE_ID/${FASTQ_ID}_1.paired.fastq $SAMPLE_ID/${FASTQ_ID}_1.fastq
+mv $SAMPLE_ID/${FASTQ_ID}_2.paired.fastq $SAMPLE_ID/${FASTQ_ID}_2.fastq
