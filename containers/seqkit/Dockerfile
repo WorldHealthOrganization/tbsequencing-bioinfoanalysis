@@ -1,4 +1,4 @@
-FROM quay.io/biocontainers/seqkit2.10.1--he881be0_0
+FROM quay.io/biocontainers/seqkit:2.10.1--he881be0_0
 
 ARG VERSION=2.10.1--he881be0_0
 
