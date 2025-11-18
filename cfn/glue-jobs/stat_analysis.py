@@ -289,6 +289,18 @@ if __name__=="__main__":
             "range",
             "mic_value"
         )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), "Middlebrook", "")
+        )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), r"^Sensititre MYCOTB$", "MYCOTB")
+        )
+        .withColumn(
+            "plate",
+            F.regexp_replace(F.col("plate"), r"^Sensititre Custom AST Plates YUKMYC5$", "MYCOTB")
+        )
         .where(
             F.col("staging")==False
         )
