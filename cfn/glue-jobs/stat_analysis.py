@@ -920,6 +920,40 @@ if __name__=="__main__":
     all_pos = all_positions_by_category(var_cat)
 
 
+    samples_without_phenotypes = (
+        filtered_samples
+        .alias("all_samples")
+        .crossJoin(
+            data_frame["genedrugresistanceassociation"]
+            .select("drug_id")
+            .distinct()   
+        )
+        .join(
+            filt_samp_drug,
+            on=["sample_id", "drug_id"],
+            how = "left_anti"
+        )
+        .select(
+            F.col("sample_id"),
+            F.col("drug_id")
+        )
+        .distinct()
+    )
+
+
+    solo_extraction(
+        gen_cat,
+        all_pos,
+        samples_without_phenotypes,
+        data_frame["locussequencingstats"],
+        data_frame["drug"],
+        gene_locus_tag,
+        data_frame["genedrugresistanceassociation"],
+        bucket,
+        orphan=True
+    )
+
+
     solo_extraction(
         gen_cat,
         all_pos,
