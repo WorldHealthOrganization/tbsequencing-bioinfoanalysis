@@ -49,15 +49,20 @@ datasource0 = (
         table_name = "deletion",
         transformation_ctx = "datasource0"
     )
+)
+
+join0 = (
+    datasource0
     .join(
         ["sampleid"],
         ["id"],
-        sample
+        sample,
+        transformation_ctx="join_sample"
     )
 )
 
 
-total = Map.apply(frame = datasource0, f = AddRefAltAD)
+total = Map.apply(frame = join0, f = AddRefAltAD)
 
 applymapping1 = ApplyMapping.apply(frame = total, mappings = [("sampleid", "long", "sample_id", "int"), ("chromosome", "string", "chromosome", "string"), ("position", "long", "position", "int"), ("deletion", "string", "reference_nucleotide", "string"), ("alternativenucleotide", "string", "alternative_nucleotide", "string"), ("genotyper", "string", "genotyper", "string"), ("quality", "long", "quality", "double"), ("alternative_ad", "int", "alternative_ad", "int"), ("reference_ad", "int", "reference_ad", "int"), ("value", "string", "genotype_value", "string"), ("total_dp", "int", "total_dp", "int")], transformation_ctx = "applymapping1")
 

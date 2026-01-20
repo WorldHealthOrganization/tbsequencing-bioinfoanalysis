@@ -48,16 +48,21 @@ datasource0 = (
         table_name = "taxonomy_assignment",
         transformation_ctx = "datasource0"
     )
+)
+
+join0 = (
+    datasource0
     .join(
         ["sampleid"],
         ["sampleid"],
-        sample
+        sample,
+        transformation_ctx="join_sample"
     )
 )
 
 applymapping1 = (
     ApplyMapping.apply(
-        frame = datasource0,
+        frame = join0,
         mappings = [("sampleid", "long", "sample_id", "int"), ("ncbitaxonid", "long", "ncbi_taxon_id", "int"), ("value", "double", "value", "double")],
         transformation_ctx = "applymapping1"
     )

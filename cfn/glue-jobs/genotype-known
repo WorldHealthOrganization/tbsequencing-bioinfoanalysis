@@ -46,15 +46,20 @@ datasource0 = (
         table_name = "genotype",
         transformation_ctx = "datasource0"
     )
+)
+
+join0 = (
+    datasource0
     .join(
         ["sampleid"],
         ["sampleid"],
-        sample
+        sample,
+        transformation_ctx="join_sample"
     )
 )
 
 applymapping1 = ApplyMapping.apply(
-    frame = datasource0,
+    frame = join0,
     mappings = [
         ("genotyper", "string", "genotyper", "string"),
         ("sampleid", "long", "sample_id", "int"),
