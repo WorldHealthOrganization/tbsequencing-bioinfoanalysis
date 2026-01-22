@@ -33,7 +33,8 @@ glue_dbname = args["glue_db_name"]
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
         database=glue_dbname,
-        table_name=dbname + "_public_submission_sample"
+        table_name=dbname + "_public_submission_sample",
+        additional_options = {'useS3ListImplementation': True}
     )
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
