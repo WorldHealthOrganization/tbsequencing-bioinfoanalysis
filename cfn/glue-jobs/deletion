@@ -36,10 +36,15 @@ glue_dbname = args["glue_db_name"]
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
         database=glue_dbname,
-        table_name=dbname + "_public_submission_sample"
+        table_name=dbname + "_public_submission_sample",
+        additional_options = {'useS3ListImplementation': True}
     )
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
+    )
+    .rename_field(
+        "`id`",
+        "sampleid"
     )
 )
 
@@ -51,18 +56,17 @@ datasource0 = (
     )
 )
 
-join0 = (
-    datasource0
-    .join(
-        ["sampleid"],
-        ["id"],
-        sample,
-        transformation_ctx="join_sample"
-    )
+
+join1 = Join.apply(
+    frame1 = datasource0,
+    frame2 = sample,
+    keys1 = "sampleid",
+    keys2 = "sampleid",
+    transformation_ctx="join1"
 )
 
 
-total = Map.apply(frame = join0, f = AddRefAltAD)
+total = Map.apply(frame = join1, f = AddRefAltAD)
 
 applymapping1 = ApplyMapping.apply(frame = total, mappings = [("sampleid", "long", "sample_id", "int"), ("chromosome", "string", "chromosome", "string"), ("position", "long", "position", "int"), ("deletion", "string", "reference_nucleotide", "string"), ("alternativenucleotide", "string", "alternative_nucleotide", "string"), ("genotyper", "string", "genotyper", "string"), ("quality", "long", "quality", "double"), ("alternative_ad", "int", "alternative_ad", "int"), ("reference_ad", "int", "reference_ad", "int"), ("value", "string", "genotype_value", "string"), ("total_dp", "int", "total_dp", "int")], transformation_ctx = "applymapping1")
 
