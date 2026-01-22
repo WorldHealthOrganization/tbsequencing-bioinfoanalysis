@@ -3,7 +3,7 @@ import sys
 # import os
 # import json
 
-from awsglue.transforms import *
+from awsglue.transforms import ApplyMapping, SelectFields, ResolveChoice, Join
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
@@ -27,6 +27,8 @@ glue_dbname = args["glue_db_name"]
 # Adding extra safeguard
 # Filter sample ids that have been correctly processed
 # bioanalysis_status = 'Uploaded to S3'
+# No bookmark on that data source because we need to
+# read the full table at each run
 
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
@@ -36,8 +38,15 @@ sample = (
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
     )
+    .rename_field(
+        "`id`",
+        "sampleid"
+    )
 )
 
+print('--- "public_submission_sample"  ---')
+print('--- "Samples Uploaded to S3 and ready for insertion"  ---')
+print(sample.count())
 
 datasource0 = (
     glueContext.create_dynamic_frame.from_catalog(
@@ -47,20 +56,18 @@ datasource0 = (
     )
 )
 
-join0 = (
-    datasource0
-    .join(
-        ["sampleid"],
-        ["id"],
-        sample,
-        transformation_ctx="join_sample"
-    )
+join1 = Join.apply(
+    frame1 = datasource0,
+    frame2 = sample,
+    keys1 = "sampleid",
+    keys2 = "sampleid",
+    transformation_ctx="join1"
 )
 
 
 applymapping1 = (
     ApplyMapping.apply(
-        frame = join0, mappings = [("sampleid", "long", "sample_id", "int"), ("mediandepth", "double", "median_depth", "double"), ("coverage10x", "double", "coverage_10x", "double"), ("coverage15x", "double", "coverage_15x", "double"), ("coverage20x", "double", "coverage_20x", "double"), ("coverage30x", "double", "coverage_30x", "double"), ("rawtotalsequences", "long", "raw_total_sequences", "long"), ("filteredsequences", "long", "filtered_sequences", "long"), ("sequences", "long", "sequences", "long"), ("issorted", "long", "is_sorted", "long"), ("firstfragments", "long", "first_fragments", "long"), ("lastfragments", "long", "last_fragments", "long"), ("readsmapped", "long", "reads_mapped", "long"), ("readsmappedandpaired", "long", "reads_mapped_and_paired", "long"), ("readsunmapped", "long", "reads_unmapped", "long"), ("readsproperlypaired", "long", "reads_properly_paired", "long"), ("readspaired", "long", "reads_paired", "long"), ("readsduplicated", "long", "reads_duplicated", "long"), ("readsmq0", "long", "reads_mq_0", "long"), ("readsqcfailed", "long", "reads_qc_failed", "long"), ("nonprimaryalignments", "long", "non_primary_alignments", "long"), ("totallength", "long", "total_length", "long"), ("totalfirstfragmentlength", "long", "total_first_fragment_length", "long"), ("totallastfragmentlength", "long", "total_last_fragment_length", "long"), ("basesmapped", "long", "bases_mapped", "long"), ("basesmappedcigar", "long", "bases_mapped_cigar", "long"), ("basestrimmed", "long", "bases_trimmed", "long"), ("basesduplicated", "long", "bases_duplicated", "long"), ("mismatches", "long", "mismatches", "long"), ("errorrate", "double", "error_rate", "double"), ("averagelength", "long", "average_length", "int"), ("averagefirstfragmentlength", "long", "average_first_fragment_length", "int"), ("averagelastfragmentlength", "long", "average_last_fragment_length", "int"), ("maximumlength", "long", "maximum_length", "int"), ("maximumfirstfragmentlength", "long", "maximum_first_fragment_length", "int"), ("maximumlastfragmentlength", "long", "maximum_last_fragment_length", "int"), ("averagequality", "double", "average_quality", "double"), ("insertsizeaverage", "double", "insert_size_average", "double"), ("insertsizestandarddeviation", "double", "insert_size_standard_deviation", "double"), ("inwardorientedpairs", "long", "inward_oriented_pairs", "int"), ("outwardorientedpairs", "long", "outward_oriented_pairs", "int"), ("pairswithotherorientation", "long", "pairs_with_other_orientation", "int"), ("pairsondifferentchromosomes", "long", "pairs_on_different_chromosomes", "int"), ("percentageofproperlypairedreads", "double", "percentage_of_properly_paired_reads", "double")], transformation_ctx = "applymapping1"
+        frame = join1, mappings = [("sampleid", "long", "sample_id", "int"), ("mediandepth", "double", "median_depth", "double"), ("coverage10x", "double", "coverage_10x", "double"), ("coverage15x", "double", "coverage_15x", "double"), ("coverage20x", "double", "coverage_20x", "double"), ("coverage30x", "double", "coverage_30x", "double"), ("rawtotalsequences", "long", "raw_total_sequences", "long"), ("filteredsequences", "long", "filtered_sequences", "long"), ("sequences", "long", "sequences", "long"), ("issorted", "long", "is_sorted", "long"), ("firstfragments", "long", "first_fragments", "long"), ("lastfragments", "long", "last_fragments", "long"), ("readsmapped", "long", "reads_mapped", "long"), ("readsmappedandpaired", "long", "reads_mapped_and_paired", "long"), ("readsunmapped", "long", "reads_unmapped", "long"), ("readsproperlypaired", "long", "reads_properly_paired", "long"), ("readspaired", "long", "reads_paired", "long"), ("readsduplicated", "long", "reads_duplicated", "long"), ("readsmq0", "long", "reads_mq_0", "long"), ("readsqcfailed", "long", "reads_qc_failed", "long"), ("nonprimaryalignments", "long", "non_primary_alignments", "long"), ("totallength", "long", "total_length", "long"), ("totalfirstfragmentlength", "long", "total_first_fragment_length", "long"), ("totallastfragmentlength", "long", "total_last_fragment_length", "long"), ("basesmapped", "long", "bases_mapped", "long"), ("basesmappedcigar", "long", "bases_mapped_cigar", "long"), ("basestrimmed", "long", "bases_trimmed", "long"), ("basesduplicated", "long", "bases_duplicated", "long"), ("mismatches", "long", "mismatches", "long"), ("errorrate", "double", "error_rate", "double"), ("averagelength", "long", "average_length", "int"), ("averagefirstfragmentlength", "long", "average_first_fragment_length", "int"), ("averagelastfragmentlength", "long", "average_last_fragment_length", "int"), ("maximumlength", "long", "maximum_length", "int"), ("maximumfirstfragmentlength", "long", "maximum_first_fragment_length", "int"), ("maximumlastfragmentlength", "long", "maximum_last_fragment_length", "int"), ("averagequality", "double", "average_quality", "double"), ("insertsizeaverage", "double", "insert_size_average", "double"), ("insertsizestandarddeviation", "double", "insert_size_standard_deviation", "double"), ("inwardorientedpairs", "long", "inward_oriented_pairs", "int"), ("outwardorientedpairs", "long", "outward_oriented_pairs", "int"), ("pairswithotherorientation", "long", "pairs_with_other_orientation", "int"), ("pairsondifferentchromosomes", "long", "pairs_on_different_chromosomes", "int"), ("percentageofproperlypairedreads", "double", "percentage_of_properly_paired_reads", "double")], transformation_ctx = "applymapping1"
     )
 )
 

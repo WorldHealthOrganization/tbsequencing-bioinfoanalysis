@@ -62,7 +62,7 @@ join1 = Join.apply(
     frame1 = datasource0,
     frame2 = sample,
     keys1 = "sampleid",
-    keys2 = "id",
+    keys2 = "sampleid",
     transformation_ctx="join1"
 )
 

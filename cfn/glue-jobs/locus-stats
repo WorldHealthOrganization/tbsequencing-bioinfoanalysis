@@ -23,6 +23,8 @@ glue_dbname = args["glue_db_name"]
 # Adding extra safeguard
 # Filter sample ids that have been correctly processed
 # bioanalysis_status = 'Uploaded to S3'
+# No bookmark on that data source because we need to
+# read the full table at each run
 
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
@@ -32,6 +34,11 @@ sample = (
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
     )
+    .rename_field(
+        "`id`",
+        "sampleid"
+    )
+
 )
 
 print('--- "public_submission_sample"  ---')
@@ -39,7 +46,7 @@ print('--- "Samples Uploaded to S3 and ready for insertion"  ---')
 print(sample.count())
 
 datasource0 = glueContext.create_dynamic_frame.from_catalog(
-    database = args["glue_db_name"], 
+    database = args["glue_db_name"],
     table_name = "locus_stats",
     transformation_ctx = "datasource0"
 )
@@ -48,9 +55,12 @@ join1 = Join.apply(
     frame1 = datasource0,
     frame2 = sample,
     keys1 = "sampleid",
-    keys2 = "id",
+    keys2 = "sampleid",
     transformation_ctx="join1"
 )
+
+
+# No bookmark either on that datasource
 
 datasource2 = glueContext.create_dynamic_frame.from_catalog(
     database = args["glue_db_name"],
