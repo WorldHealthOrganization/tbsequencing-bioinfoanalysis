@@ -1,7 +1,6 @@
 import sys
 
-from awsglue.transforms import ApplyMapping, Filter, SelectFields
-from awsglue.dynamicframe import DynamicFrame
+from awsglue.transforms import ApplyMapping, Filter, SelectFields, Join
 from awsglue.utils import getResolvedOptions
 from awsglue.job import Job
 from awsglue.context import GlueContext
@@ -25,6 +24,8 @@ glue_dbname = args["glue_db_name"]
 # Adding extra safeguard
 # Filter sample ids that have been correctly processed
 # bioanalysis_status = 'Uploaded to S3'
+# No bookmark on that data source because we need to
+# read the full table at each run
 
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
@@ -38,7 +39,13 @@ sample = (
         "`id`",
         "sampleid"
     )
+
 )
+
+print('--- "public_submission_sample"  ---')
+print('--- "Samples Uploaded to S3 and ready for insertion"  ---')
+print(sample.count())
+
 
 datasource0 = (
     glueContext.create_dynamic_frame.from_catalog(
@@ -48,18 +55,18 @@ datasource0 = (
     )
 )
 
-join0 = (
-    datasource0
-    .join(
-        ["sampleid"],
-        ["sampleid"],
-        sample,
-        transformation_ctx="join_sample"
-    )
+
+join1 = Join.apply(
+    frame1 = datasource0,
+    frame2 = sample,
+    keys1 = "sampleid",
+    keys2 = "sampleid",
+    transformation_ctx="join1"
 )
 
+
 applymapping1 = ApplyMapping.apply(
-    frame = join0,
+    frame = join1,
     mappings = [
         ("genotyper", "string", "genotyper", "string"),
         ("sampleid", "long", "sample_id", "int"),
