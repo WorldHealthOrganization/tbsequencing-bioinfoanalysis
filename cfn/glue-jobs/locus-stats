@@ -29,8 +29,7 @@ glue_dbname = args["glue_db_name"]
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
         database=glue_dbname,
-        table_name=dbname + "_public_submission_sample",
-        additional_options = {'useS3ListImplementation': True}
+        table_name=dbname + "_public_submission_sample"
     )
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
@@ -49,6 +48,7 @@ print(sample.count())
 datasource0 = glueContext.create_dynamic_frame.from_catalog(
     database = args["glue_db_name"],
     table_name = "locus_stats",
+    additional_options = {'useS3ListImplementation': True},
     transformation_ctx = "datasource0"
 )
 
@@ -70,14 +70,14 @@ datasource2 = glueContext.create_dynamic_frame.from_catalog(
 
 join3 = Join.apply(
     frame1 = join1,
-    frame2 = datasource0,
+    frame2 = datasource2,
     keys1 = "locustagname",
     keys2 = "locus_tag_name",
     transformation_ctx="join3"
 )
 
 applymapping4 = ApplyMapping.apply(
-    frame = join1, 
+    frame = join3, 
     mappings = [
         ("gene_db_crossref_id", "int", "gene_db_crossref_id", "int"),
         ("sampleid", "long", "sample_id", "int"),

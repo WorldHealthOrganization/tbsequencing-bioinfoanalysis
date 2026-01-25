@@ -33,8 +33,7 @@ glue_dbname = args["glue_db_name"]
 sample = (
     glueContext.create_dynamic_frame.from_catalog(
         database=glue_dbname,
-        table_name=dbname + "_public_submission_sample",
-        additional_options = {'useS3ListImplementation': True}
+        table_name=dbname + "_public_submission_sample"
     )
     .filter(
         f=lambda x: x["bioanalysis_status"]=="Uploaded to S3"
@@ -54,6 +53,7 @@ datasource0 = (
     glueContext.create_dynamic_frame.from_catalog(
         database = args["glue_db_name"],
         table_name = "taxonomy_assignment",
+        additional_options = {'useS3ListImplementation': True},
         transformation_ctx = "datasource0"
     )
 )
@@ -71,7 +71,11 @@ join1 = Join.apply(
 applymapping2 = (
     ApplyMapping.apply(
         frame = join1,
-        mappings = [("sampleid", "long", "sample_id", "int"), ("ncbitaxonid", "long", "ncbi_taxon_id", "int"), ("value", "double", "value", "double")],
+        mappings = [
+            ("sampleid", "long", "sample_id", "int"),
+            ("ncbitaxonid", "long", "ncbi_taxon_id", "int"),
+            ("value", "double", "value", "double")
+        ],
         transformation_ctx = "applymapping2"
     )
 )
