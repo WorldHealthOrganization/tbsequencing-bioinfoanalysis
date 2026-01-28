@@ -61,7 +61,6 @@ print('--- "datasource_global_stats"  ---')
 print('--- "Number of files read from the S3 data source"  ---')
 print(datasource0.count())
 
-
 join1 = Join.apply(
     frame1 = datasource0,
     frame2 = sample,
@@ -69,7 +68,6 @@ join1 = Join.apply(
     keys2 = "sampleid",
     transformation_ctx="join1"
 )
-
 
 applymapping1 = (
     ApplyMapping.apply(

@@ -39,7 +39,6 @@ sample = (
         "`id`",
         "sampleid"
     )
-
 )
 
 print('--- "public_submission_sample"  ---')

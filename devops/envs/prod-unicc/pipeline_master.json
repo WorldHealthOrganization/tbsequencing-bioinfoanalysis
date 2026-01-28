@@ -387,6 +387,11 @@
                 }
             ]
         },
+        "waitFifteenMinutes": {
+            "Type": "Wait",
+            "Seconds": 900,
+            "Next": "insertTaxonomy"
+        },
         "insertTaxonomy": {
             "Type": "Task",
             "Resource": "arn:aws:states:::glue:startJobRun.sync",
@@ -420,7 +425,7 @@
                     "Next": "FailEnd"
                 }
             ],
-            "Default": "insertTaxonomy"
+            "Default": "waitFifteenMinutes"
         },
         "DataInsertionExecution": {
             "Type": "Task",
